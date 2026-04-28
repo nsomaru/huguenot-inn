@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import traceback
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 
 import fitz  # PyMuPDF
 from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -21,17 +22,10 @@ POSITIONS = [
 ]
 
 
-def unique_paths(paths: list[Path]) -> list[Path]:
-    seen = set()
-    out = []
-
-    for path in paths:
-        resolved = path.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            out.append(path)
-
-    return out
+@dataclass
+class PDFItem:
+    path: Path
+    title: str
 
 
 def get_number_box(
@@ -41,14 +35,16 @@ def get_number_box(
     box_height: float,
     margin: float,
 ) -> fitz.Rect:
-    if "left" in position.lower():
+    position_lower = position.lower()
+
+    if "left" in position_lower:
         x0 = page_rect.x0 + margin
-    elif "right" in position.lower():
+    elif "right" in position_lower:
         x0 = page_rect.x1 - margin - box_width
     else:
         x0 = page_rect.x0 + (page_rect.width - box_width) / 2
 
-    if "top" in position.lower():
+    if "top" in position_lower:
         y0 = page_rect.y0 + margin
     else:
         y0 = page_rect.y1 - margin - box_height
@@ -65,7 +61,7 @@ def draw_page_number(
 ) -> None:
     """
     Draws a clean, readable page number:
-    - bold Helvetica
+    - Helvetica Bold
     - centred in a small white backing box
     - subtle border
     """
@@ -73,8 +69,12 @@ def draw_page_number(
     text = str(number)
     page_rect = page.rect
 
-    # Width grows slightly for 3+ digit page numbers.
-    text_width = fitz.get_text_length(text, fontname="hebo", fontsize=font_size)
+    text_width = fitz.get_text_length(
+        text,
+        fontname="hebo",
+        fontsize=font_size,
+    )
+
     box_width = max(34, text_width + 18)
     box_height = font_size + 12
 
@@ -86,7 +86,6 @@ def draw_page_number(
         margin=margin,
     )
 
-    # White backing improves readability over scans, photos, stamps, etc.
     page.draw_rect(
         box,
         color=(0, 0, 0),
@@ -96,34 +95,49 @@ def draw_page_number(
         stroke_opacity=0.65,
     )
 
-    # Insert text centred inside the backing box.
     page.insert_textbox(
         box,
         text,
         fontsize=font_size,
-        fontname="hebo",  # Helvetica Bold
+        fontname="hebo",
         color=(0, 0, 0),
         align=fitz.TEXT_ALIGN_CENTER,
     )
 
 
-def combine_and_number_pdfs(
-    pdf_paths: list[Path],
+def combine_number_and_add_toc(
+    pdf_items: list[PDFItem],
     output_path: Path,
     position: str,
     font_size: int,
     margin: int,
 ) -> None:
-    if not pdf_paths:
+    if not pdf_items:
         raise ValueError("No PDFs selected.")
 
     output_doc = fitz.open()
 
+    # PyMuPDF TOC entries are:
+    # [level, title, page_number]
+    #
+    # page_number is 1-based.
+    toc: list[list[int | str]] = []
+
     try:
-        for pdf_path in pdf_paths:
-            source = fitz.open(pdf_path)
+        current_start_page = 1
+
+        for item in pdf_items:
+            source = fitz.open(item.path)
             try:
+                if source.page_count == 0:
+                    continue
+
+                toc_title = item.title.strip() or item.path.stem
+
+                toc.append([1, toc_title, current_start_page])
+
                 output_doc.insert_pdf(source)
+                current_start_page += source.page_count
             finally:
                 source.close()
 
@@ -136,20 +150,23 @@ def combine_and_number_pdfs(
                 margin=margin,
             )
 
+        if toc:
+            output_doc.set_toc(toc)
+
         output_doc.save(output_path, garbage=4, deflate=True)
     finally:
         output_doc.close()
 
 
-class PDFCombinerNumbererApp(TkinterDnD.Tk):
+class PDFCombinerNumbererTOCApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__()
 
-        self.title("PDF Combiner + Page Numberer")
-        self.geometry("700x480")
-        self.minsize(650, 440)
+        self.title("PDF Combiner + Page Numberer + TOC")
+        self.geometry("850x520")
+        self.minsize(760, 460)
 
-        self.pdf_paths: list[Path] = []
+        self.pdf_items: list[PDFItem] = []
 
         self.position_var = tk.StringVar(value="Bottom centre")
         self.font_size_var = tk.IntVar(value=15)
@@ -163,7 +180,7 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
 
         title = ttk.Label(
             outer,
-            text="Drag PDFs here, arrange them, then create one numbered PDF",
+            text="Drag PDFs here, edit TOC names, then create one numbered PDF",
             font=("TkDefaultFont", 15, "bold"),
         )
         title.pack(anchor="w", pady=(0, 12))
@@ -171,7 +188,7 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
         controls = ttk.Frame(outer)
         controls.pack(fill="x", pady=(0, 12))
 
-        ttk.Label(controls, text="Position:").grid(row=0, column=0, sticky="w")
+        ttk.Label(controls, text="Number position:").grid(row=0, column=0, sticky="w")
 
         position_box = ttk.Combobox(
             controls,
@@ -210,22 +227,34 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
         left = ttk.Frame(main)
         left.pack(side="left", fill="both", expand=True)
 
-        self.listbox = tk.Listbox(
+        self.tree = ttk.Treeview(
             left,
-            selectmode=tk.SINGLE,
-            activestyle="dotbox",
-            height=12,
+            columns=("order", "title", "file"),
+            show="headings",
+            selectmode="browse",
         )
-        self.listbox.pack(fill="both", expand=True)
 
-        self.listbox.drop_target_register(DND_FILES)
-        self.listbox.dnd_bind("<<Drop>>", self.on_drop)
+        self.tree.heading("order", text="#")
+        self.tree.heading("title", text="TOC entry")
+        self.tree.heading("file", text="PDF file")
 
-        drop_hint = ttk.Label(
+        self.tree.column("order", width=45, anchor="center", stretch=False)
+        self.tree.column("title", width=300, anchor="w", stretch=True)
+        self.tree.column("file", width=360, anchor="w", stretch=True)
+
+        self.tree.pack(fill="both", expand=True)
+
+        self.tree.drop_target_register(DND_FILES)
+        self.tree.dnd_bind("<<Drop>>", self.on_drop)
+
+        self.tree.bind("<Double-1>", self.on_tree_double_click)
+        self.tree.bind("<Return>", lambda event: self.edit_selected_title())
+
+        hint = ttk.Label(
             left,
-            text="Drop PDFs into the list. They will be numbered in this order.",
+            text="Double-click a TOC entry to rename it. The PDF bookmarks will use these names.",
         )
-        drop_hint.pack(anchor="w", pady=(6, 0))
+        hint.pack(anchor="w", pady=(6, 0))
 
         buttons = ttk.Frame(main)
         buttons.pack(side="right", fill="y", padx=(12, 0))
@@ -233,15 +262,23 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
         ttk.Button(buttons, text="Add PDFs", command=self.add_pdfs_dialog).pack(
             fill="x", pady=(0, 6)
         )
+
+        ttk.Button(buttons, text="Edit TOC name", command=self.edit_selected_title).pack(
+            fill="x", pady=(0, 6)
+        )
+
         ttk.Button(buttons, text="Move up", command=self.move_up).pack(
             fill="x", pady=(0, 6)
         )
+
         ttk.Button(buttons, text="Move down", command=self.move_down).pack(
             fill="x", pady=(0, 6)
         )
+
         ttk.Button(buttons, text="Remove", command=self.remove_selected).pack(
             fill="x", pady=(0, 6)
         )
+
         ttk.Button(buttons, text="Clear", command=self.clear_list).pack(
             fill="x", pady=(0, 18)
         )
@@ -261,36 +298,65 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
 
     def parse_drop_files(self, data: str) -> list[Path]:
         raw_paths = self.tk.splitlist(data)
-        pdfs = [
+
+        return [
             Path(p)
             for p in raw_paths
             if Path(p).is_file() and Path(p).suffix.lower() == ".pdf"
         ]
-        return pdfs
 
     def add_paths(self, paths: list[Path]) -> None:
-        existing = {p.resolve() for p in self.pdf_paths}
+        existing = {item.path.resolve() for item in self.pdf_items}
 
         added = 0
+
         for path in paths:
             resolved = path.resolve()
-            if resolved not in existing:
-                self.pdf_paths.append(path)
-                existing.add(resolved)
-                added += 1
 
-        self.refresh_listbox()
+            if resolved in existing:
+                continue
+
+            self.pdf_items.append(
+                PDFItem(
+                    path=path,
+                    title=path.stem,
+                )
+            )
+
+            existing.add(resolved)
+            added += 1
+
+        self.refresh_tree()
 
         if added:
-            self.status.config(text=f"Added {added} PDF(s). Total: {len(self.pdf_paths)}.")
+            self.status.config(
+                text=f"Added {added} PDF(s). Total: {len(self.pdf_items)}."
+            )
         else:
             self.status.config(text="No new PDFs added.")
 
-    def refresh_listbox(self) -> None:
-        self.listbox.delete(0, tk.END)
+    def refresh_tree(self) -> None:
+        self.tree.delete(*self.tree.get_children())
 
-        for index, path in enumerate(self.pdf_paths, start=1):
-            self.listbox.insert(tk.END, f"{index}. {path.name}")
+        for index, item in enumerate(self.pdf_items, start=1):
+            self.tree.insert(
+                "",
+                tk.END,
+                iid=str(index - 1),
+                values=(
+                    index,
+                    item.title,
+                    item.path.name,
+                ),
+            )
+
+    def selected_index(self) -> int | None:
+        selection = self.tree.selection()
+
+        if not selection:
+            return None
+
+        return int(selection[0])
 
     def on_drop(self, event) -> None:
         pdfs = self.parse_drop_files(event.data)
@@ -310,54 +376,93 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
         if selected:
             self.add_paths([Path(p) for p in selected])
 
-    def selected_index(self) -> int | None:
-        selection = self.listbox.curselection()
-        if not selection:
-            return None
-        return int(selection[0])
+    def on_tree_double_click(self, event) -> None:
+        region = self.tree.identify("region", event.x, event.y)
+        column = self.tree.identify_column(event.x)
+
+        # Only edit the TOC title column.
+        if region == "cell" and column == "#2":
+            self.edit_selected_title()
+
+    def edit_selected_title(self) -> None:
+        index = self.selected_index()
+
+        if index is None:
+            messagebox.showwarning("Nothing selected", "Please select a PDF first.")
+            return
+
+        item = self.pdf_items[index]
+
+        new_title = simpledialog.askstring(
+            title="Edit TOC entry",
+            prompt="TOC entry name:",
+            initialvalue=item.title,
+            parent=self,
+        )
+
+        if new_title is None:
+            return
+
+        new_title = new_title.strip()
+
+        if not new_title:
+            messagebox.showwarning(
+                "Blank title",
+                "The TOC entry cannot be blank.",
+            )
+            return
+
+        item.title = new_title
+        self.refresh_tree()
+        self.tree.selection_set(str(index))
+        self.status.config(text=f"Renamed TOC entry to: {new_title}")
 
     def move_up(self) -> None:
         index = self.selected_index()
+
         if index is None or index == 0:
             return
 
-        self.pdf_paths[index - 1], self.pdf_paths[index] = (
-            self.pdf_paths[index],
-            self.pdf_paths[index - 1],
+        self.pdf_items[index - 1], self.pdf_items[index] = (
+            self.pdf_items[index],
+            self.pdf_items[index - 1],
         )
 
-        self.refresh_listbox()
-        self.listbox.selection_set(index - 1)
+        self.refresh_tree()
+        self.tree.selection_set(str(index - 1))
 
     def move_down(self) -> None:
         index = self.selected_index()
-        if index is None or index >= len(self.pdf_paths) - 1:
+
+        if index is None or index >= len(self.pdf_items) - 1:
             return
 
-        self.pdf_paths[index + 1], self.pdf_paths[index] = (
-            self.pdf_paths[index],
-            self.pdf_paths[index + 1],
+        self.pdf_items[index + 1], self.pdf_items[index] = (
+            self.pdf_items[index],
+            self.pdf_items[index + 1],
         )
 
-        self.refresh_listbox()
-        self.listbox.selection_set(index + 1)
+        self.refresh_tree()
+        self.tree.selection_set(str(index + 1))
 
     def remove_selected(self) -> None:
         index = self.selected_index()
+
         if index is None:
             return
 
-        removed = self.pdf_paths.pop(index)
-        self.refresh_listbox()
-        self.status.config(text=f"Removed {removed.name}.")
+        removed = self.pdf_items.pop(index)
+
+        self.refresh_tree()
+        self.status.config(text=f"Removed {removed.path.name}.")
 
     def clear_list(self) -> None:
-        self.pdf_paths.clear()
-        self.refresh_listbox()
+        self.pdf_items.clear()
+        self.refresh_tree()
         self.status.config(text="List cleared.")
 
     def create_combined_pdf(self) -> None:
-        if not self.pdf_paths:
+        if not self.pdf_items:
             messagebox.showwarning("No PDFs", "Please add one or more PDFs first.")
             return
 
@@ -374,8 +479,8 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
         output_path = Path(output_path_str)
 
         try:
-            combine_and_number_pdfs(
-                pdf_paths=self.pdf_paths,
+            combine_number_and_add_toc(
+                pdf_items=self.pdf_items,
                 output_path=output_path,
                 position=self.position_var.get(),
                 font_size=int(self.font_size_var.get()),
@@ -392,7 +497,7 @@ class PDFCombinerNumbererApp(TkinterDnD.Tk):
 
 
 def main() -> None:
-    app = PDFCombinerNumbererApp()
+    app = PDFCombinerNumbererTOCApp()
     app.mainloop()
 
 
