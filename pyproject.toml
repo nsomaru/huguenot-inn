@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "huguenot-inn"
+version = "0.1.0"
+description = "Small GUI tool to combine PDFs, add page numbers, create PDF bookmarks, and generate an authorities index."
+requires-python = ">=3.11"
+authors = [
+  { name = "Nikhil Somaru" }
+]
+dependencies = [
+  "pymupdf>=1.24,<2",
+  "python-docx>=1.1,<2",
+  "tkinterdnd2>=0.4,<1"
+]
+
+[project.urls]
+Homepage = "https://example.com/pdf-bundle-numberer"
+
+[project.scripts]
+huguenot-inn = "huguenot.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/huguenot"]
