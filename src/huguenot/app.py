@@ -612,7 +612,11 @@ def draw_page_number(page: fitz.Page, number: int, position: str, font_size: int
     text = str(number)
     page_rect = page.rect
 
-    text_width = fitz.get_text_length(text, fontname="hebo", fontsize=font_size)
+    # Avoid insert_textbox() for page numbers. On some PDFs/viewers it can render
+    # the built-in bold font with a faint duplicate/offset glyph, which looks
+    # like a shadow under the number. We draw one explicit text run instead.
+    fontname = "hebo"
+    text_width = fitz.get_text_length(text, fontname=fontname, fontsize=font_size)
     box_width = max(34, text_width + 18)
     box_height = font_size + 12
 
@@ -623,17 +627,20 @@ def draw_page_number(page: fitz.Page, number: int, position: str, font_size: int
         color=(0, 0, 0),
         fill=(1, 1, 1),
         width=0.6,
-        fill_opacity=0.85,
+        fill_opacity=1.0,
         stroke_opacity=0.65,
     )
 
-    page.insert_textbox(
-        box,
+    x = box.x0 + (box.width - text_width) / 2
+    y = box.y0 + (box.height + font_size * 0.70) / 2
+
+    page.insert_text(
+        fitz.Point(x, y),
         text,
         fontsize=font_size,
-        fontname="hebo",
+        fontname=fontname,
         color=(0, 0, 0),
-        align=fitz.TEXT_ALIGN_CENTER,
+        render_mode=0,
     )
 
 
