@@ -35,3 +35,6 @@ htmlcov/
 
 .omx/
 uv.lock
+
+# Generated macOS packaging artifacts
+packaging/assets/*.icns

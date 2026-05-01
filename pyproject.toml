@@ -16,6 +16,11 @@ dependencies = [
   "tkinterdnd2>=0.4,<1"
 ]
 
+[project.optional-dependencies]
+packaging = [
+  "pyinstaller>=6,<7"
+]
+
 [project.urls]
 Homepage = "https://example.com/pdf-bundle-numberer"
 
