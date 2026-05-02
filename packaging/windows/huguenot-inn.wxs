@@ -1,0 +1,14 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Huguenot Inn" Manufacturer="Nikhil Somaru" Version="$(var.Version)" UpgradeCode="9c960d6b-7d1f-4a2c-9c4f-0d1e4f69efc5" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Huguenot Inn is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Huguenot Inn" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Huguenot Inn" Level="1">
+      <Files Directory="INSTALLFOLDER" Include="$(var.SourceDir)\**" />
+    </Feature>
+  </Package>
+</Wix>

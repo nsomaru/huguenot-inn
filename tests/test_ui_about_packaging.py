@@ -171,3 +171,17 @@ def test_icon_generation_without_magick_reuses_existing_assets_or_fails(monkeypa
     generated = module.generate_icons(asset_dir)
 
     assert all(path.read_bytes().startswith(b"prebuilt-") for path in generated)
+
+
+def test_macos_dmg_artifact_name_contract() -> None:
+    script = Path("scripts/build_macos_dmg.sh").read_text()
+
+    assert "Huguenot-Inn-${VERSION}-macOS-arm64.dmg" in script
+
+
+def test_macos_script_preserves_unsigned_build() -> None:
+    combined = Path("scripts/build_macos_dmg.sh").read_text() + Path("packaging/huguenot-inn.spec").read_text()
+
+    assert "codesign_identity=None" in combined
+    assert "notarytool" not in combined.lower()
+    assert "altool" not in combined.lower()

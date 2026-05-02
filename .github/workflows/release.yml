@@ -1,0 +1,125 @@
+name: Release artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-flatpak:
+    name: Build Linux Flatpak
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python scripts/release_artifacts.py validate-version "${GITHUB_REF_NAME}")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Generate Flatpak Python dependency manifest
+        run: |
+          git clone --depth 1 https://github.com/flatpak/flatpak-builder-tools.git /tmp/flatpak-builder-tools
+          python /tmp/flatpak-builder-tools/pip/flatpak-pip-generator \
+            --requirements-file=packaging/flatpak/requirements.txt \
+            --output=packaging/flatpak/python3-dependencies
+      - name: Build Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: Huguenot-Inn-${{ steps.version.outputs.version }}-Linux-x86_64.flatpak
+          manifest-path: packaging/flatpak/com.nikhilsomaru.HuguenotInn.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+      - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Huguenot-Inn-${{ steps.version.outputs.version }}-Linux-x86_64.flatpak
+          path: Huguenot-Inn-${{ steps.version.outputs.version }}-Linux-x86_64.flatpak
+          if-no-files-found: error
+
+  build-macos-dmg:
+    name: Build macOS DMG
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python scripts/release_artifacts.py validate-version "${GITHUB_REF_NAME}")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Install packaging dependencies
+        run: python -m pip install -e '.[packaging]'
+      - name: Build DMG
+        run: scripts/build_macos_dmg.sh
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Huguenot-Inn-${{ steps.version.outputs.version }}-macOS-arm64.dmg
+          path: dist/Huguenot-Inn-${{ steps.version.outputs.version }}-macOS-arm64.dmg
+          if-no-files-found: error
+
+  build-windows-msi:
+    name: Build Windows MSI
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate version tag
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(python scripts/release_artifacts.py validate-version "${GITHUB_REF_NAME}")"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Install packaging dependencies
+        shell: pwsh
+        run: python -m pip install -e '.[packaging]'
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: dotnet tool install --global wix
+      - name: Build MSI
+        shell: pwsh
+        run: scripts/build_windows_msi.ps1
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Huguenot-Inn-${{ steps.version.outputs.version }}-Windows-x64.msi
+          path: dist/Huguenot-Inn-${{ steps.version.outputs.version }}-Windows-x64.msi
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs:
+      - build-flatpak
+      - build-macos-dmg
+      - build-windows-msi
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Validate artifact set
+        run: python scripts/release_artifacts.py validate-artifacts "${{ needs.build-flatpak.outputs.version }}" release-assets
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            release-assets/Huguenot-Inn-${{ needs.build-flatpak.outputs.version }}-Linux-x86_64.flatpak \
+            release-assets/Huguenot-Inn-${{ needs.build-macos-dmg.outputs.version }}-macOS-arm64.dmg \
+            release-assets/Huguenot-Inn-${{ needs.build-windows-msi.outputs.version }}-Windows-x64.msi \
+            --generate-notes \
+            --verify-tag

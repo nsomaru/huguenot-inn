@@ -36,7 +36,7 @@ When no matter is active, bundle and authorities-index generation keeps the orig
 - **Create PDF bundle only** generates the numbered PDF bundle without a front index.
 - **Create authorities index (.docx)** generates the editable matter index document.
 
-ReportLab is the default renderer for matter-index PDFs. LibreOffice remains available as an explicit higher-fidelity `.docx` to PDF conversion option; the app detects LibreOffice from PATH and common macOS app-bundle locations, probes whether it can run headlessly, and uses an isolated temporary LibreOffice profile during conversion. Microsoft Word conversion is also available through `docx2pdf` on Windows/macOS when Microsoft Word is installed; it is not a Linux renderer.
+ReportLab is the default renderer for matter-index PDFs. LibreOffice remains available as an explicit higher-fidelity `.docx` to PDF conversion option; the app detects LibreOffice from PATH, common macOS app-bundle locations, Linux package/Flatpak export locations, and common Windows install directories, probes whether it can run headlessly, and uses an isolated temporary LibreOffice profile during conversion. Microsoft Word conversion is also available through `docx2pdf` on Windows/macOS when Microsoft Word is installed; it is not a Linux renderer.
 
 ## Advanced output options
 
@@ -104,6 +104,17 @@ scripts/build_macos_dmg.sh
 ```
 
 The output is written to `dist/Huguenot-Inn-<version>-macOS-arm64.dmg`.
+
+## Release workflow
+
+Pushing a version tag such as `v0.4.1a` runs `.github/workflows/release.yml`. The tag version must match both `pyproject.toml` and `huguenot.__version__`. CI generates the Flatpak Python dependency manifest from `packaging/flatpak/requirements.txt`, builds unsigned artifacts for the three supported formats, and publishes a GitHub release with generated notes:
+
+- `Huguenot-Inn-<version>-Linux-x86_64.flatpak`
+- `Huguenot-Inn-<version>-macOS-arm64.dmg`
+- `Huguenot-Inn-<version>-Windows-x64.msi`
+
+The release job validates that exactly those three artifacts are present before calling `gh release create --generate-notes --verify-tag`. Signing, notarization, auto-updates, and non-Flatpak Linux packages are intentionally out of scope for this pass.
+
 
 The PyInstaller build includes packaged migration files and application icon assets. During the PyInstaller build, `packaging/generate_icons.py` uses Magick to generate smaller icon PNGs from `examples/new_icon.png` for packaged UI use. The source PNG is expected to already have its background removed; the build does not perform background cleanup.
 

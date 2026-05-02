@@ -1,0 +1,23 @@
+id: com.nikhilsomaru.HuguenotInn
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: huguenot-inn
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home
+modules:
+  - python3-dependencies.json
+  - name: huguenot-inn
+    buildsystem: simple
+    build-commands:
+      - python3 -m pip install --prefix=/app --no-build-isolation .
+      - install -Dm644 packaging/flatpak/com.nikhilsomaru.HuguenotInn.desktop /app/share/applications/com.nikhilsomaru.HuguenotInn.desktop
+      - install -Dm644 packaging/flatpak/com.nikhilsomaru.HuguenotInn.metainfo.xml /app/share/metainfo/com.nikhilsomaru.HuguenotInn.metainfo.xml
+      - install -Dm644 packaging/assets/huguenot-inn-icon-256.png /app/share/icons/hicolor/256x256/apps/com.nikhilsomaru.HuguenotInn.png
+    sources:
+      - type: dir
+        path: ../..

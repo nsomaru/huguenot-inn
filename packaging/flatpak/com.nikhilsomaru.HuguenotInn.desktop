@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Huguenot Inn
+Comment=Create numbered PDF bundles and authorities indexes
+Exec=huguenot-inn
+Icon=com.nikhilsomaru.HuguenotInn
+Categories=Office;Utility;
+Terminal=false

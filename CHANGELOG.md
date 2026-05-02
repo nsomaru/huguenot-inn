@@ -2,6 +2,22 @@
 
 All notable changes to **Huguenot Inn** are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Added a tag-triggered GitHub Actions release workflow that builds unsigned Linux Flatpak, macOS DMG, and Windows MSI artifacts and publishes a GitHub release with generated notes.
+- Added release-version and artifact-set validation helpers so pushed version tags must match the project/runtime version and releases attach exactly the three expected artifacts.
+- Added Flatpak packaging metadata, generated Python dependency manifest support, and Windows PyInstaller/WiX MSI packaging configuration.
+
+### Fixed
+
+- Extended LibreOffice detection to cover Linux package paths, Linux Flatpak exports, and common Windows installation directories while preserving PATH and macOS bundle precedence.
+
+### Tests
+
+- Added regression coverage for release workflow shape, version/artifact validation, Flatpak packaging contracts, Windows MSI packaging contracts, macOS unsigned artifact naming, and Windows/Linux LibreOffice detection.
+
 ## [0.4.1a] - 2026-05-02
 
 ### Fixed

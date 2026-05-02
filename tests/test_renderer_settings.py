@@ -57,6 +57,45 @@ def test_libreoffice_locator_checks_path_and_macos_bundle(monkeypatch: pytest.Mo
     assert LibreOfficeConverter.find_executable() == "/Applications/LibreOffice.app/Contents/MacOS/soffice"
 
 
+def test_libreoffice_locator_checks_linux_standard_locations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setattr(Path, "exists", lambda self: str(self) == "/usr/bin/libreoffice")
+
+    assert LibreOfficeConverter.find_executable() == "/usr/bin/libreoffice"
+
+
+def test_libreoffice_locator_checks_linux_flatpak_exports(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda self: str(self) == "/var/lib/flatpak/exports/bin/org.libreoffice.LibreOffice",
+    )
+
+    assert LibreOfficeConverter.find_executable() == "/var/lib/flatpak/exports/bin/org.libreoffice.LibreOffice"
+
+
+def test_libreoffice_locator_checks_windows_install_locations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setenv("ProgramFiles", "C:/Program Files")
+    monkeypatch.setenv("ProgramFiles(x86)", "C:/Program Files (x86)")
+    monkeypatch.setenv("LOCALAPPDATA", "C:/Users/example/AppData/Local")
+    expected = "C:/Program Files/LibreOffice/program/soffice.exe"
+    monkeypatch.setattr(Path, "exists", lambda self: str(self).replace("\\", "/") == expected)
+
+    executable = LibreOfficeConverter.find_executable()
+
+    assert executable is not None
+    assert executable.replace("\\", "/") == expected
+
+
+def test_libreoffice_locator_returns_none_when_no_candidates_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    monkeypatch.setattr(Path, "exists", lambda _self: False)
+
+    assert LibreOfficeConverter.find_executable() is None
+
+
 def test_libreoffice_available_runs_mockable_usability_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
@@ -67,6 +106,7 @@ def test_libreoffice_available_runs_mockable_usability_probe(monkeypatch: pytest
     monkeypatch.setattr("subprocess.run", fake_run)
     converter = LibreOfficeConverter(executable="/Applications/LibreOffice.app/Contents/MacOS/soffice")
 
+    assert converter.libreoffice_available() is True
     assert converter.libreoffice_available() is True
     assert calls == [["/Applications/LibreOffice.app/Contents/MacOS/soffice", "--headless", "--version"]]
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess  # nosec B404
 import tempfile
@@ -25,13 +26,27 @@ class LibreOfficeConverter:
             executable = shutil.which(command)
             if executable:
                 return executable
-        for candidate in (
-            Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
-            Path.home() / "Applications/LibreOffice.app/Contents/MacOS/soffice",
-        ):
+        for candidate in LibreOfficeConverter.executable_candidates():
             if candidate.exists():
                 return str(candidate)
         return None
+
+    @staticmethod
+    def executable_candidates() -> tuple[Path, ...]:
+        candidates = [
+            Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+            Path.home() / "Applications/LibreOffice.app/Contents/MacOS/soffice",
+            Path("/usr/bin/libreoffice"),
+            Path("/usr/local/bin/libreoffice"),
+            Path("/snap/bin/libreoffice"),
+            Path("/var/lib/flatpak/exports/bin/org.libreoffice.LibreOffice"),
+            Path.home() / ".local/share/flatpak/exports/bin/org.libreoffice.LibreOffice",
+        ]
+        for env_name in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+            base = os.environ.get(env_name)
+            if base:
+                candidates.append(Path(base) / "LibreOffice" / "program" / "soffice.exe")
+        return tuple(candidates)
 
     def libreoffice_available(self) -> bool:
         if self.executable is None:
