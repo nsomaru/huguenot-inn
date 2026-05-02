@@ -3,7 +3,15 @@ from __future__ import annotations
 import shutil
 import subprocess  # nosec B404
 import tempfile
+from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
+from typing import Any, Protocol
+
+
+class DocxToPdfConverter(Protocol):
+    def converter_available(self) -> bool: ...
+    def convert_docx_to_pdf(self, docx_path: Path, output_dir: Path) -> Path: ...
 
 
 class LibreOfficeConverter:
@@ -43,6 +51,9 @@ class LibreOfficeConverter:
                 self._available_cache = True
         return self._available_cache
 
+    def converter_available(self) -> bool:
+        return self.libreoffice_available()
+
     def convert_docx_to_pdf(self, docx_path: Path, output_dir: Path) -> Path:
         if self.executable is None:
             raise FileNotFoundError("LibreOffice command-line executable was not found.")
@@ -63,4 +74,38 @@ class LibreOfficeConverter:
         output_path = output_dir / f"{docx_path.stem}.pdf"
         if not output_path.exists():
             raise FileNotFoundError(f"LibreOffice did not create expected PDF: {output_path}")
+        return output_path
+
+
+class Docx2PdfConverter:
+    def __init__(self, import_module: Callable[[str], Any] = import_module) -> None:
+        self._import_module = import_module
+
+    def converter_available(self) -> bool:
+        try:
+            self._import_module("docx2pdf")
+        except ModuleNotFoundError:
+            return False
+        return True
+
+    def convert_docx_to_pdf(self, docx_path: Path, output_dir: Path) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{docx_path.stem}.pdf"
+        try:
+            docx2pdf = self._import_module("docx2pdf")
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Microsoft Word conversion requires the optional docx2pdf package and Microsoft Word "
+                "on Windows or macOS."
+            ) from exc
+
+        try:
+            docx2pdf.convert(str(docx_path), str(output_path))
+        except Exception as exc:
+            raise RuntimeError(
+                "Microsoft Word conversion failed. Ensure Microsoft Word is installed and docx2pdf is supported "
+                "on this platform."
+            ) from exc
+        if not output_path.exists():
+            raise FileNotFoundError(f"docx2pdf did not create expected PDF: {output_path}")
         return output_path

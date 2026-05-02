@@ -10,8 +10,9 @@ from typing import Any, cast
 
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
-from huguenot.application import MatterService
+from huguenot.application import DuplicateDecision, DuplicatePDF, MatterService, plan_pdf_additions
 from huguenot.documents import (
+    Docx2PdfConverter,
     LibreOfficeConverter,
     PDFRenderer,
     RendererPreference,
@@ -20,10 +21,25 @@ from huguenot.documents import (
     list_system_fonts,
     render_matter_index_pdf,
 )
-from huguenot.domain import DocumentHeaderInput, Matter, PDFItem, ProceedingType
+from huguenot.domain import (
+    DocumentHeaderInput,
+    Matter,
+    PDFItem,
+    ProceedingType,
+    matter_output_filename,
+    matter_output_root,
+)
 from huguenot.pdf import POSITIONS, combine_number_and_add_toc, combine_with_front_index, detect_authority_index_item
 from huguenot.persistence import SQLiteCourtRepository, SQLiteMatterRepository, create_app_database
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path, app_icon_path
+
+APP_WINDOW_TITLE = "Huguenot Inn"
+REPORTLAB_RENDERER_LABEL = "ReportLab (default)"
+LIBREOFFICE_RENDERER_LABEL = "LibreOffice"
+WORD_RENDERER_LABEL = "Microsoft Word"
+DUPLICATE_ADD_ANYWAY_LABEL = "Add Anyway"
+DUPLICATE_SKIP_LABEL = "Skip"
+DUPLICATE_SKIP_ALL_LABEL_TEMPLATE = "Skip all {count} duplicates"
 
 
 class MatterDialog(tk.Toplevel):
@@ -179,7 +195,7 @@ class OpenMatterDialog(tk.Toplevel):
 class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("PDF Combiner + Page Numberer + Authorities Index")
+        self.title(APP_WINDOW_TITLE)
         self.geometry("900x570")
         self.minsize(800, 500)
 
@@ -193,7 +209,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self.position_var = tk.StringVar(value="Bottom centre")
         self.font_size_var = tk.IntVar(value=15)
         self.margin_var = tk.IntVar(value=28)
-        self.renderer_var = tk.StringVar(value="Automatic")
+        self.renderer_var = tk.StringVar(value=REPORTLAB_RENDERER_LABEL)
         self.index_font_var = tk.StringVar(value="Times New Roman")
         self._system_fonts = list_system_fonts()
         self._icon_image: tk.PhotoImage | None = None
@@ -234,7 +250,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         ttk.Combobox(
             advanced,
             textvariable=self.renderer_var,
-            values=["Automatic", "LibreOffice", "ReportLab"],
+            values=[REPORTLAB_RENDERER_LABEL, LIBREOFFICE_RENDERER_LABEL, WORD_RENDERER_LABEL],
             state="readonly",
             width=18,
         ).grid(row=0, column=1, sticky="w", padx=(8, 24))
@@ -324,9 +340,14 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         value = self.renderer_var.get().lower()
         renderer = {
             "libreoffice": PDFRenderer.LIBREOFFICE,
-            "reportlab": PDFRenderer.REPORTLAB,
-        }.get(value, PDFRenderer.AUTOMATIC)
+            "microsoft word": PDFRenderer.LIBREOFFICE,
+        }.get(value, PDFRenderer.REPORTLAB)
         return RendererPreference(renderer)
+
+    def _document_converter(self):
+        if self.renderer_var.get() == WORD_RENDERER_LABEL:
+            return Docx2PdfConverter()
+        return LibreOfficeConverter()
 
     def show_about(self) -> None:
         dialog = tk.Toplevel(self)
@@ -386,17 +407,58 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         return [Path(p) for p in raw_paths if Path(p).is_file() and Path(p).suffix.lower() == ".pdf"]
 
     def add_paths(self, paths: list[Path]) -> None:
-        existing = {item.path.resolve() for item in self.pdf_items}
-        added = 0
-        for path in paths:
-            resolved = path.resolve()
-            if resolved in existing:
-                continue
-            self.pdf_items.append(PDFItem(path=path, title=detect_authority_index_item(path)))
-            existing.add(resolved)
-            added += 1
+        result = plan_pdf_additions(
+            self.pdf_items,
+            paths,
+            detect_title=detect_authority_index_item,
+            decide_duplicate=self._decide_duplicate_pdf,
+        )
+        self.pdf_items.extend(result.added)
         self.refresh_tree()
-        self._update_status(f"Added {added} PDF(s)." if added else "No new PDFs added.")
+        added = len(result.added)
+        duplicate_count = len(result.duplicates)
+        if duplicate_count:
+            self._update_status(f"Added {added} PDF(s); reviewed {duplicate_count} duplicate(s).")
+        else:
+            self._update_status(f"Added {added} PDF(s)." if added else "No new PDFs added.")
+
+    def _decide_duplicate_pdf(self, duplicate: DuplicatePDF, remaining_duplicates: int) -> DuplicateDecision:
+        dialog = tk.Toplevel(self)
+        dialog.title("Duplicate citation")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        dialog.grab_set()
+        decision = tk.StringVar(value=DuplicateDecision.SKIP.value)
+        outer = ttk.Frame(dialog, padding=14)
+        outer.pack(fill="both", expand=True)
+        message = (
+            "This PDF appears to duplicate an authority already in the list.\n\n"
+            f"New file: {duplicate.path.name}\n"
+            f"Detected citation: {duplicate.title}\n"
+            f"Existing citation: {duplicate.duplicate_title}\n\n"
+            "Do you want to add it anyway or skip it?"
+        )
+        ttk.Label(outer, text=message, justify="left", wraplength=460).pack(anchor="w")
+        actions = ttk.Frame(outer)
+        actions.pack(fill="x", pady=(14, 0))
+
+        def choose(value: DuplicateDecision) -> None:
+            decision.set(value.value)
+            dialog.destroy()
+
+        ttk.Button(actions, text=DUPLICATE_ADD_ANYWAY_LABEL, command=lambda: choose(DuplicateDecision.ADD_ANYWAY)).pack(
+            side="right", padx=(8, 0)
+        )
+        ttk.Button(actions, text=DUPLICATE_SKIP_LABEL, command=lambda: choose(DuplicateDecision.SKIP)).pack(
+            side="right", padx=(8, 0)
+        )
+        ttk.Button(
+            actions,
+            text=DUPLICATE_SKIP_ALL_LABEL_TEMPLATE.format(count=remaining_duplicates),
+            command=lambda: choose(DuplicateDecision.SKIP_ALL),
+        ).pack(side="right")
+        self.wait_window(dialog)
+        return DuplicateDecision(decision.get())
 
     def refresh_tree(self) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -500,7 +562,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             title="Save matter bundle PDF as",
             defaultextension=".pdf",
             filetypes=[("PDF files", "*.pdf")],
-            initialfile="matter_authorities_bundle.pdf",
+            initialfile=matter_output_filename(self.active_matter, "AUTHORITIES_BUNDLE", ".pdf"),
         )
         if not output_path_str:
             return
@@ -518,7 +580,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 index_pdf = Path(tmp) / "matter_index.pdf"
-                converter = LibreOfficeConverter()
+                converter = self._document_converter()
                 used_libreoffice, links = render_matter_index_pdf(
                     self.active_matter,
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
@@ -528,12 +590,6 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                     renderer_preference=self._renderer_preference(),
                     font_name=self.index_font_var.get(),
                 )
-                if not used_libreoffice and self.renderer_var.get() == "Automatic":
-                    messagebox.showinfo(
-                        "LibreOffice not available",
-                        "LibreOffice was not available for high-fidelity conversion. "
-                        "Using the lower-fidelity pure-Python PDF renderer.",
-                    )
                 combine_with_front_index(
                     self.pdf_items,
                     index_pdf,
@@ -542,6 +598,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                     self.position_var.get(),
                     int(self.font_size_var.get()),
                     int(self.margin_var.get()),
+                    toc_root_title=matter_output_root(self.active_matter),
                 )
         except Exception as exc:
             traceback.print_exc()
@@ -588,7 +645,11 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             title="Save authorities index as",
             defaultextension=".docx",
             filetypes=[("Word documents", "*.docx")],
-            initialfile="authorities_index.docx",
+            initialfile=(
+                matter_output_filename(self.active_matter, "AUTHORITIES_INDEX", ".docx")
+                if self.active_matter
+                else "authorities_index.docx"
+            ),
         )
         if not output_path_str:
             return

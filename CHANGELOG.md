@@ -2,6 +2,33 @@
 
 All notable changes to **Huguenot Inn** are documented here.
 
+## [0.3.0a] - 2026-05-02
+
+### Added
+
+- Added duplicate authority warning flow when newly added PDFs have identical detected citations/titles.
+  - Users can add the duplicate anyway, skip it, or skip all remaining duplicates in the add flow.
+- Added matter-based output names and front-index ToC roots such as `first-applicant_v_first-respondent_AUTHORITIES_BUNDLE.pdf`.
+- Added modular Microsoft Word/docx2pdf conversion support for Windows/macOS systems with Microsoft Word installed.
+
+### Changed
+
+- Default matter-index PDF rendering now uses ReportLab for deterministic output.
+- Updated the main application window title to **Huguenot Inn**.
+- Regenerated packaged icon assets from `examples/new_icon.png`.
+- Removed automated icon background cleanup; provided PNGs are now treated as already background-removed.
+- Increased DOCX tramline spacing and table-cell padding for more readable authorities indexes.
+- Preserved existing no-matter bundle defaults and PDF bundle behavior.
+
+### Fixed
+
+- Fixed cramped DOCX matter headers where tramlines sat too close to the heading.
+- Fixed generic matter output filenames by deriving defaults from the first bringing and opposing parties.
+
+### Verification
+
+- Planned verification: Ruff formatting, Ruff lint, Pyright, Pytest, and Bandit before release completion.
+
 ## [0.2.0a] - 2026-05-02
 
 ### Added

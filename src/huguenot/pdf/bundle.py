@@ -114,6 +114,8 @@ def combine_with_front_index(
     position: str,
     font_size: int,
     margin: int,
+    *,
+    toc_root_title: str = "Index",
 ) -> None:
     if not pdf_items:
         raise ValueError("No PDFs selected.")
@@ -126,7 +128,7 @@ def combine_with_front_index(
     finally:
         index_doc.close()
 
-    toc: list[list[int | str]] = [[1, "Index", 1]]
+    toc: list[list[int | str]] = [[1, toc_root_title.strip() or "Index", 1]]
     current_start_page = index_page_count + 1
     try:
         for item in pdf_items:

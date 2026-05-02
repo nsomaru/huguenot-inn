@@ -10,7 +10,7 @@ import fitz
 from huguenot.domain import DocumentHeaderInput, Matter, PDFItem
 
 from .authorities_index import create_matter_authorities_index_docx, get_index_entries
-from .converter import LibreOfficeConverter
+from .converter import DocxToPdfConverter, LibreOfficeConverter
 from .reportlab_index import ReportLabIndexRenderer
 from .settings import FontResolver, PDFRenderer, RendererPreference, choose_pdf_renderer
 
@@ -23,7 +23,7 @@ def render_matter_index_pdf(
     pdf_items: list[PDFItem],
     output_path: Path,
     *,
-    converter: LibreOfficeConverter | None = None,
+    converter: DocxToPdfConverter | None = None,
     renderer_preference: RendererPreference | None = None,
     font_name: str | None = None,
 ) -> tuple[bool, list[dict[str, int | float]]]:
@@ -31,7 +31,9 @@ def render_matter_index_pdf(
     renderer_preference = renderer_preference or RendererPreference()
     font = FontResolver().resolve(font_name)
     try:
-        renderer = choose_pdf_renderer(renderer_preference, libreoffice_available=converter.libreoffice_available)
+        renderer = choose_pdf_renderer(
+            renderer_preference, libreoffice_available=lambda: _converter_available(converter)
+        )
     except RuntimeError:
         raise
 
@@ -70,6 +72,10 @@ def render_matter_index_pdf(
     return False, links
 
 
+def _converter_available(converter: DocxToPdfConverter) -> bool:
+    return converter.converter_available()
+
+
 def _render_with_bundle_page_numbers(
     output_path: Path,
     render: Callable[[Path, int], list[dict[str, int | float]]],
@@ -82,7 +88,7 @@ def _render_with_libreoffice(
     document_header: DocumentHeaderInput,
     pdf_items: list[PDFItem],
     output_path: Path,
-    converter: LibreOfficeConverter,
+    converter: DocxToPdfConverter,
     *,
     start_page: int,
     font_name: str,

@@ -105,3 +105,32 @@ def test_matter_authorities_index_uses_table_header_rules_bold_case_and_superscr
     assert '<w:bottom w:val="single"' in xml
     assert "w:left=" in xml and "w:hanging=" in xml
     assert "w:tcMar" in xml
+
+
+def test_docx_matter_index_uses_roomier_header_tramlines_and_cells(tmp_path: Path) -> None:
+    pdf = tmp_path / "authority.pdf"
+    make_pdf(pdf, "Authority", pages=1)
+    output = tmp_path / "matter_index.docx"
+    matter = Matter(
+        court=Court("IN THE HIGH COURT OF SOUTH AFRICA", "(GAUTENG DIVISION, JOHANNESBURG)"),
+        proceeding_type=ProceedingType.APPLICATION,
+        case_number="2026-086328",
+        parties=(
+            Party("First Applicant", PartySide.BRINGING, 1),
+            Party("First Respondent", PartySide.OPPOSING, 1),
+        ),
+    )
+
+    create_matter_authorities_index_docx(
+        matter,
+        DocumentHeaderInput("Respondents' Authorities Bundle"),
+        [PDFItem(pdf, "Authority title")],
+        output,
+    )
+
+    with ZipFile(output) as archive:
+        xml = archive.read("word/document.xml").decode()
+    assert 'w:top w:w="100"' in xml
+    assert 'w:bottom w:w="100"' in xml
+    assert 'w:before="180"' in xml
+    assert 'w:after="180"' in xml

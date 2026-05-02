@@ -13,10 +13,11 @@ Huguenot Inn is a small Tkinter desktop app for creating numbered PDF bundles an
 - Create and reopen persisted matters with South African court metadata.
 - Generate a matter bundle with a front authorities index, or keep the editable `.docx` index and PDF bundle separate.
 - Create invisible hyperlinks from front-index rows to the correct authority pages in the combined PDF.
-- Choose the PDF index renderer from **Automatic**, **LibreOffice**, or **ReportLab**.
+- Choose the PDF index renderer from **ReportLab (default)**, **LibreOffice**, or **Microsoft Word**.
 - Choose the index output font from a searchable system-font dropdown; Times New Roman is the default with safe backend fallbacks.
 - Render matter headers with court lines, bold case number, party tables, superscript party ordinals, and tramline heading rules based on `examples/header_example.docx`.
-- Use LibreOffice for high-fidelity `.docx` to PDF conversion when available, with a ReportLab fallback renderer.
+- Use deterministic ReportLab PDF rendering by default, with explicit LibreOffice or Microsoft Word/docx2pdf conversion when available.
+- Warn when newly added PDFs appear to duplicate an authority already in the list, with **Add Anyway**, **Skip**, and **Skip all N duplicates** choices.
 - Display application/version/license details from **Help > About Huguenot Inn**.
 
 ## Install from source
@@ -31,20 +32,20 @@ Use **File > New Matter** to create a matter, or **File > Open/Select Matter** t
 
 When no matter is active, bundle and authorities-index generation keeps the original no-matter behavior. When a matter is active:
 
-- **Create combined numbered PDF** generates a single PDF with the matter-style authorities index at the front, page-range links into the bundle, PDF outline ToC entries, and visible page numbering that starts at the first attached authority document.
+- **Create combined numbered PDF** generates a single PDF with the matter-style authorities index at the front, page-range links into the bundle, PDF outline ToC entries, and visible page numbering that starts at the first attached authority document. Matter outputs default to filenames such as `first-applicant_v_first-respondent_AUTHORITIES_BUNDLE.pdf`.
 - **Create PDF bundle only** generates the numbered PDF bundle without a front index.
 - **Create authorities index (.docx)** generates the editable matter index document.
 
-LibreOffice is used when available for higher-fidelity `.docx` to PDF conversion of the matter index. The app detects LibreOffice from PATH and common macOS app-bundle locations, probes whether it can run headlessly, and uses an isolated temporary LibreOffice profile during conversion. In **Automatic** renderer mode, the app falls back to the pure-Python ReportLab renderer when LibreOffice is unavailable or conversion fails.
+ReportLab is the default renderer for matter-index PDFs. LibreOffice remains available as an explicit higher-fidelity `.docx` to PDF conversion option; the app detects LibreOffice from PATH and common macOS app-bundle locations, probes whether it can run headlessly, and uses an isolated temporary LibreOffice profile during conversion. Microsoft Word conversion is also available through `docx2pdf` on Windows/macOS when Microsoft Word is installed; it is not a Linux renderer.
 
 ## Advanced output options
 
 The **Advanced** pane controls matter-index output behavior:
 
 - **PDF index renderer**
-  - **Automatic**: use LibreOffice when available and ReportLab otherwise.
+  - **ReportLab (default)**: use the pure-Python renderer directly.
   - **LibreOffice**: require LibreOffice and fail visibly if conversion is unavailable.
-  - **ReportLab**: use the pure-Python renderer directly.
+  - **Microsoft Word**: use `docx2pdf`, which requires Microsoft Word on Windows or macOS.
 - **Index font**
   - Defaults to Times New Roman.
   - Provides a searchable dropdown of system fonts.
@@ -60,8 +61,10 @@ Matter index outputs aim to match the supplied header example closely:
 - parties are rendered in a two-column table instead of tabbed text;
 - party ordinal suffixes such as `1st`, `2nd`, and `3rd` use superscript;
 - document headings use horizontal tramline rules aligned to the parties table;
+- tramline rules are spaced away from the heading so the header has more breathing room;
 - long authority titles wrap inside table cells;
 - wrapped authority titles receive a small hanging indent;
+- DOCX table cells include extra padding for readability;
 - DOCX, LibreOffice-rendered PDF, and ReportLab-rendered PDF indexes all include page ranges.
 
 ## Development
@@ -102,7 +105,7 @@ scripts/build_macos_dmg.sh
 
 The output is written to `dist/Huguenot-Inn-<version>-macOS-arm64.dmg`.
 
-The PyInstaller build includes packaged migration files and application icon assets. During the PyInstaller build, `packaging/generate_icons.py` uses Magick to generate smaller icon PNGs for packaged UI use.
+The PyInstaller build includes packaged migration files and application icon assets. During the PyInstaller build, `packaging/generate_icons.py` uses Magick to generate smaller icon PNGs from `examples/new_icon.png` for packaged UI use. The source PNG is expected to already have its background removed; the build does not perform background cleanup.
 
 ### DMG layout
 
@@ -136,7 +139,7 @@ Only open apps from sources you trust.
 After building, you can verify the agreed artifact shape without running app functionality:
 
 ```bash
-DMG="dist/Huguenot-Inn-0.2.0a-macOS-arm64.dmg"
+DMG="dist/Huguenot-Inn-0.3.0a-macOS-arm64.dmg"
 hdiutil attach "$DMG"
 ls -la "/Volumes/Huguenot Inn"
 test -d "/Volumes/Huguenot Inn/Huguenot Inn.app"

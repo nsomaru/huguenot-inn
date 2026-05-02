@@ -17,6 +17,8 @@ from huguenot.domain import DocumentHeaderInput, Matter, PageRange, PartySide, P
 DEFAULT_INDEX_FONT = "Times New Roman"
 PARTIES_TABLE_WIDTH_INCHES = 7.2
 PARTIES_TABLE_COLUMN_WIDTHS = (5.4, 1.8)
+TABLE_CELL_MARGIN_TWIPS = 100
+HEADING_TRAMLINE_SPACING_PT = 9
 
 
 def set_repeat_table_header(row) -> None:
@@ -85,7 +87,14 @@ def set_hanging_indent(paragraph, *, indent_twips: int = 180, hanging_twips: int
     ind.set(qn("w:hanging"), str(hanging_twips))
 
 
-def set_cell_margins(cell, *, top: int = 60, start: int = 80, bottom: int = 60, end: int = 80) -> None:
+def set_cell_margins(
+    cell,
+    *,
+    top: int = TABLE_CELL_MARGIN_TWIPS,
+    start: int = TABLE_CELL_MARGIN_TWIPS,
+    bottom: int = TABLE_CELL_MARGIN_TWIPS,
+    end: int = TABLE_CELL_MARGIN_TWIPS,
+) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
     tc_mar = tc_pr.find(qn("w:tcMar"))
     if tc_mar is None:
@@ -309,8 +318,8 @@ def create_matter_authorities_index_docx(
     add_tramline(doc, font_name=font_name)
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    heading.paragraph_format.space_before = Pt(4)
-    heading.paragraph_format.space_after = Pt(4)
+    heading.paragraph_format.space_before = Pt(HEADING_TRAMLINE_SPACING_PT)
+    heading.paragraph_format.space_after = Pt(HEADING_TRAMLINE_SPACING_PT)
     heading_run = heading.add_run(document_header.title.upper())
     heading_run.bold = True
     heading_run.font.name = font_name

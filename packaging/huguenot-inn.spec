@@ -29,6 +29,7 @@ datas += collect_data_files("huguenot.persistence", includes=["migrations/*.sql"
 datas += [(str(ICON_PNG_PATH), "assets")]
 datas += [(str(path), "assets") for path in GENERATED_ICON_PATHS]
 hiddenimports = collect_submodules("tkinterdnd2")
+hiddenimports += collect_submodules("docx2pdf")
 
 
 a = Analysis(

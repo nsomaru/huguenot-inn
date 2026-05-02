@@ -78,4 +78,4 @@ def choose_pdf_renderer(preference: RendererPreference, *, libreoffice_available
         if not libreoffice_available():
             raise RuntimeError("LibreOffice is not available or usable for PDF conversion.")
         return PDFRenderer.LIBREOFFICE
-    return PDFRenderer.LIBREOFFICE if libreoffice_available() else PDFRenderer.REPORTLAB
+    return PDFRenderer.REPORTLAB

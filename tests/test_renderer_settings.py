@@ -30,10 +30,10 @@ def test_renderer_preference_selects_reportlab_without_checking_libreoffice() ->
     )
 
 
-def test_renderer_preference_auto_uses_libreoffice_when_available() -> None:
+def test_renderer_preference_auto_uses_reportlab_by_default() -> None:
     assert (
         choose_pdf_renderer(RendererPreference(PDFRenderer.AUTOMATIC), libreoffice_available=lambda: True)
-        is PDFRenderer.LIBREOFFICE
+        is PDFRenderer.REPORTLAB
     )
     assert (
         choose_pdf_renderer(RendererPreference(PDFRenderer.AUTOMATIC), libreoffice_available=lambda: False)
@@ -69,3 +69,17 @@ def test_libreoffice_available_runs_mockable_usability_probe(monkeypatch: pytest
 
     assert converter.libreoffice_available() is True
     assert calls == [["/Applications/LibreOffice.app/Contents/MacOS/soffice", "--headless", "--version"]]
+
+
+def test_renderer_preference_auto_defaults_to_reportlab_without_libreoffice_probe() -> None:
+    def fail_if_called() -> bool:
+        raise AssertionError("Automatic renderer should not probe LibreOffice when ReportLab is the default")
+
+    assert (
+        choose_pdf_renderer(RendererPreference(PDFRenderer.AUTOMATIC), libreoffice_available=fail_if_called)
+        is PDFRenderer.REPORTLAB
+    )
+
+
+def test_pdf_renderer_does_not_conflate_word_converter() -> None:
+    assert "WORD" not in PDFRenderer.__members__

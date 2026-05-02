@@ -1,5 +1,4 @@
 import importlib.util
-import subprocess
 from pathlib import Path
 
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path
@@ -14,16 +13,7 @@ def test_about_metadata_contains_required_notice() -> None:
 
 
 def test_packaged_icon_source_matches_new_icon() -> None:
-    source_size = Path("packaging/assets/huguenot-inn-icon.png").stat().st_size
-    original_size = Path("examples/new_icon.png").stat().st_size
-    assert source_size != original_size
-    pixel = subprocess.run(
-        ["magick", "packaging/assets/huguenot-inn-icon.png", "-format", "%[pixel:p{0,0}]", "info:"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert pixel == "srgba(0,0,0,0)"
+    assert Path("packaging/assets/huguenot-inn-icon.png").read_bytes() == Path("examples/new_icon.png").read_bytes()
 
 
 def test_pyinstaller_spec_can_build_from_png_icon_source() -> None:
@@ -32,6 +22,7 @@ def test_pyinstaller_spec_can_build_from_png_icon_source() -> None:
     assert "ICON_ICNS_PATH if ICON_ICNS_PATH.exists() else ICON_PNG_PATH" in spec
     assert "generate_icons" in spec
     assert "huguenot-inn-icon.png" in spec
+    assert 'collect_submodules("docx2pdf")' in spec
 
 
 def test_about_uses_generated_small_icon() -> None:
@@ -39,13 +30,6 @@ def test_about_uses_generated_small_icon() -> None:
     assert path.name == "huguenot-inn-icon-64.png"
     assert path.exists()
     assert path.stat().st_size < Path("packaging/assets/huguenot-inn-icon.png").stat().st_size
-    pixel = subprocess.run(
-        ["magick", str(path), "-format", "%[pixel:p{0,0}]", "info:"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert pixel == "srgba(0,0,0,0)"
 
 
 def test_icon_generation_sizes_are_declared() -> None:
@@ -58,3 +42,68 @@ def test_icon_generation_sizes_are_declared() -> None:
     assert module.ICON_SIZES == (16, 32, 64, 128, 256)
     for size in module.ICON_SIZES:
         assert Path(f"packaging/assets/huguenot-inn-icon-{size}.png").exists()
+
+
+def test_main_window_title_constant_is_huguenot_inn() -> None:
+    from huguenot.ui.app import APP_WINDOW_TITLE
+
+    assert APP_WINDOW_TITLE == "Huguenot Inn"
+
+
+def test_icon_generation_uses_new_icon_and_resize_only(monkeypatch, tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("generate_icons", "packaging/generate_icons.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    source_dir = tmp_path / "examples"
+    asset_dir = tmp_path / "assets"
+    source_dir.mkdir()
+    asset_dir.mkdir()
+    source = source_dir / "new_icon.png"
+    source.write_bytes(b"icon")
+    commands = []
+
+    monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/magick" if name == "magick" else None)
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"resized")
+        return object()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    generated = module.generate_icons(asset_dir)
+
+    assert len(generated) == len(module.ICON_SIZES)
+    assert all(str(source) in command for command in commands)
+    flattened = " ".join(part for command in commands for part in command)
+    assert "-resize" in flattened
+    assert "-fuzz" not in flattened
+    assert "floodfill" not in flattened
+    assert "-fill" not in flattened
+
+
+def test_icon_generation_without_magick_reuses_existing_assets_or_fails(monkeypatch, tmp_path: Path) -> None:
+    spec = importlib.util.spec_from_file_location("generate_icons", "packaging/generate_icons.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    source_dir = tmp_path / "examples"
+    asset_dir = tmp_path / "assets"
+    source_dir.mkdir()
+    asset_dir.mkdir()
+    (source_dir / "new_icon.png").write_bytes(b"large-source")
+    for size in module.ICON_SIZES:
+        (asset_dir / f"huguenot-inn-icon-{size}.png").write_bytes(f"prebuilt-{size}".encode())
+
+    monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: None)
+
+    generated = module.generate_icons(asset_dir)
+
+    assert all(path.read_bytes().startswith(b"prebuilt-") for path in generated)
