@@ -34,7 +34,7 @@ from huguenot.persistence import SQLiteCourtRepository, SQLiteMatterRepository, 
 from huguenot.ui import duplicate_dialog
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path, app_icon_path
 from huguenot.ui.duplicate_dialog import ask_duplicate_decision
-from huguenot.ui.platform import configure_app_identity
+from huguenot.ui.platform import configure_app_identity, root_identity_options
 
 APP_WINDOW_TITLE = "Huguenot Inn"
 REPORTLAB_RENDERER_LABEL = "ReportLab (default)"
@@ -197,7 +197,7 @@ class OpenMatterDialog(tk.Toplevel):
 
 class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(**root_identity_options(APP_WINDOW_TITLE))
         configure_app_identity(self, APP_WINDOW_TITLE)
         self.title(APP_WINDOW_TITLE)
         self.geometry("900x570")

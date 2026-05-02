@@ -4,6 +4,11 @@ import tkinter as tk
 from typing import Any
 
 
+def root_identity_options(application_name: str) -> dict[str, str]:
+    """Return Tk root options that name the application before Tk initializes."""
+    return {"baseName": application_name}
+
+
 def configure_app_identity(root: Any, application_name: str) -> None:
     """Apply best-effort Tk application naming for window managers and macOS."""
     _try_tk_call(root, "tk", "appname", application_name)

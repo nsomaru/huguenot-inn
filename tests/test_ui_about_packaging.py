@@ -71,6 +71,19 @@ def test_platform_identity_sets_tk_appname_and_macos_name() -> None:
     assert ("tk::mac::SetApplicationName", "Huguenot Inn") in calls
 
 
+def test_platform_root_identity_options_set_tk_base_name() -> None:
+    from huguenot.ui.platform import root_identity_options
+
+    assert root_identity_options("Huguenot Inn") == {"baseName": "Huguenot Inn"}
+
+
+def test_main_app_initializes_tk_with_root_identity_options() -> None:
+    source = Path("src/huguenot/ui/app.py").read_text()
+
+    assert "root_identity_options(APP_WINDOW_TITLE)" in source
+    assert "super().__init__(**root_identity_options(APP_WINDOW_TITLE))" in source
+
+
 def test_platform_identity_ignores_unsupported_tcl_commands() -> None:
     import tkinter as tk
 
