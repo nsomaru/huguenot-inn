@@ -41,3 +41,6 @@ packaging/assets/*.icns
 
 # Example files for the agent
 examples/
+
+# Local scratch todo note
+\\

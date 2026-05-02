@@ -22,6 +22,9 @@ from huguenot.documents import (
     render_matter_index_pdf,
 )
 from huguenot.domain import (
+    DEFAULT_NUMBER_FONT_SIZE,
+    DEFAULT_NUMBER_MARGIN,
+    DEFAULT_NUMBER_POSITION,
     DocumentHeaderInput,
     Matter,
     PDFItem,
@@ -210,9 +213,9 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self.active_matter = self.matter_service.get_last_active_matter()
 
         self.pdf_items: list[PDFItem] = []
-        self.position_var = tk.StringVar(value="Bottom centre")
-        self.font_size_var = tk.IntVar(value=15)
-        self.margin_var = tk.IntVar(value=28)
+        self.position_var = tk.StringVar(value=DEFAULT_NUMBER_POSITION)
+        self.font_size_var = tk.IntVar(value=DEFAULT_NUMBER_FONT_SIZE)
+        self.margin_var = tk.IntVar(value=DEFAULT_NUMBER_MARGIN)
         self.renderer_var = tk.StringVar(value=REPORTLAB_RENDERER_LABEL)
         self.index_font_var = tk.StringVar(value="Times New Roman")
         self._system_fonts = list_system_fonts()

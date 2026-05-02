@@ -1,22 +1,29 @@
 from __future__ import annotations
 
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import fitz
 
-from huguenot.domain import PDFItem
+from huguenot.domain import (
+    DEFAULT_NUMBER_FONT_SIZE,
+    DEFAULT_NUMBER_MARGIN,
+    DEFAULT_NUMBER_POSITION,
+    NUMBER_POSITIONS,
+    PDFItem,
+)
+from huguenot.domain.legal_titles import normalize_legal_display_title
 
 from .authority_detection import clean_filename_title
 
-POSITIONS = [
-    "Bottom centre",
-    "Bottom right",
-    "Bottom left",
-    "Top centre",
-    "Top right",
-    "Top left",
-]
+POSITIONS = NUMBER_POSITIONS
+
+
+@dataclass(frozen=True)
+class NumberBoxSize:
+    width: float
+    height: float
 
 
 def get_pdf_page_count(path: Path) -> int:
@@ -45,20 +52,32 @@ def get_number_box(
     return fitz.Rect(x0, y0, x0 + box_width, y0 + box_height)
 
 
-def draw_page_number(page: fitz.Page, number: int, position: str, font_size: int = 15, margin: int = 28) -> None:
+def number_box_size(text: str, *, font_size: int, fontname: str = "hebo") -> NumberBoxSize:
+    text_width = fitz.get_text_length(text, fontname=fontname, fontsize=font_size)
+    horizontal_padding = font_size * 0.75
+    return NumberBoxSize(
+        width=max(font_size * 2.25, text_width + horizontal_padding * 2),
+        height=font_size * 1.85,
+    )
+
+
+def draw_page_number(
+    page: fitz.Page,
+    number: int,
+    position: str = DEFAULT_NUMBER_POSITION,
+    font_size: int = DEFAULT_NUMBER_FONT_SIZE,
+    margin: int = DEFAULT_NUMBER_MARGIN,
+) -> None:
     text = str(number)
     page_rect = page.rect
     fontname = "hebo"
     text_width = fitz.get_text_length(text, fontname=fontname, fontsize=font_size)
-    box_width = max(34, text_width + 18)
-    box_height = font_size + 12
-    box = get_number_box(page_rect, position, box_width, box_height, margin)
+    box_size = number_box_size(text, font_size=font_size, fontname=fontname)
+    box = get_number_box(page_rect, position, box_size.width, box_size.height, margin)
     page.draw_rect(
         box,
         color=(0, 0, 0),
-        fill=(1, 1, 1),
         width=0.6,
-        fill_opacity=1.0,
         stroke_opacity=0.65,
     )
     x = box.x0 + (box.width - text_width) / 2
@@ -74,7 +93,11 @@ def draw_page_number(page: fitz.Page, number: int, position: str, font_size: int
 
 
 def combine_number_and_add_toc(
-    pdf_items: list[PDFItem], output_path: Path, position: str, font_size: int, margin: int
+    pdf_items: list[PDFItem],
+    output_path: Path,
+    position: str = DEFAULT_NUMBER_POSITION,
+    font_size: int = DEFAULT_NUMBER_FONT_SIZE,
+    margin: int = DEFAULT_NUMBER_MARGIN,
 ) -> None:
     if not pdf_items:
         raise ValueError("No PDFs selected.")
@@ -88,7 +111,7 @@ def combine_number_and_add_toc(
             try:
                 if source.page_count == 0:
                     continue
-                toc_title = item.title.strip() or clean_filename_title(item.path)
+                toc_title = _display_toc_title(item)
                 toc.append([1, toc_title, current_start_page])
                 output_doc.insert_pdf(source)
                 current_start_page += source.page_count
@@ -111,9 +134,9 @@ def combine_with_front_index(
     index_pdf_path: Path,
     index_links: list[dict[str, int | float]],
     output_path: Path,
-    position: str,
-    font_size: int,
-    margin: int,
+    position: str = DEFAULT_NUMBER_POSITION,
+    font_size: int = DEFAULT_NUMBER_FONT_SIZE,
+    margin: int = DEFAULT_NUMBER_MARGIN,
     *,
     toc_root_title: str = "Index",
 ) -> None:
@@ -136,7 +159,7 @@ def combine_with_front_index(
             try:
                 if source.page_count == 0:
                     continue
-                toc_title = item.title.strip() or clean_filename_title(item.path)
+                toc_title = _display_toc_title(item)
                 toc.append([1, toc_title, current_start_page])
                 output_doc.insert_pdf(source)
                 current_start_page += source.page_count
@@ -165,6 +188,11 @@ def combine_with_front_index(
 def _set_toc(doc: fitz.Document, toc: list[list[int | str]]) -> None:
     if toc:
         doc.set_toc(toc)
+
+
+def _display_toc_title(item: PDFItem) -> str:
+    raw_title = item.title.strip() or clean_filename_title(item.path)
+    return normalize_legal_display_title(raw_title)
 
 
 def _ensure_saved_toc(output_path: Path, toc: list[list[int | str]]) -> None:

@@ -31,6 +31,17 @@ def test_plain_authorities_index_uses_page_ranges(tmp_path: Path) -> None:
     assert doc.tables[0].cell(1, 2).text == "1-2"
 
 
+def test_plain_authorities_index_normalizes_afrikaans_authority_titles(tmp_path: Path) -> None:
+    pdf = tmp_path / "authority.pdf"
+    make_pdf(pdf, "Authority", pages=1)
+    output = tmp_path / "index.docx"
+
+    create_authorities_index_docx([PDFItem(pdf, "S V BOTHA EN 'N ANDER")], output)
+
+    doc = Document(str(output))
+    assert doc.tables[0].cell(1, 1).text == "S v Botha en 'n Ander"
+
+
 def test_matter_authorities_index_contains_header_parties_and_document_title(tmp_path: Path) -> None:
     pdf = tmp_path / "authority.pdf"
     make_pdf(pdf, "Authority", pages=1)

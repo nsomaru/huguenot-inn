@@ -13,6 +13,7 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
 from huguenot.domain import DocumentHeaderInput, Matter, PageRange, PartySide, PDFItem, party_label
+from huguenot.domain.legal_titles import normalize_legal_display_title
 
 DEFAULT_INDEX_FONT = "Times New Roman"
 PARTIES_TABLE_WIDTH_INCHES = 7.2
@@ -169,7 +170,7 @@ def add_authorities_table(
         row.height = Pt(18)
         row_cells = row.cells
         set_cell_text(row_cells[0], str(number), align=WD_ALIGN_PARAGRAPH.CENTER, font_name=font_name)
-        set_cell_text(row_cells[1], item.title, font_name=font_name)
+        set_cell_text(row_cells[1], normalize_legal_display_title(item.title), font_name=font_name)
         set_hanging_indent(row_cells[1].paragraphs[0])
         set_cell_text(row_cells[2], page_range.display(), align=WD_ALIGN_PARAGRAPH.CENTER, font_name=font_name)
     set_table_fixed_width(table, (0.55, 5.7, 1.25))

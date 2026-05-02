@@ -5,6 +5,8 @@ from pathlib import Path
 
 import fitz
 
+from huguenot.domain.legal_titles import normalize_legal_display_title
+
 REGEX_FLAGS = re.IGNORECASE | re.VERBOSE
 PARTY_CHARS = "A-Za-zÀ-ÖØ-öø-ÿ0-9&'’’.(), -"
 
@@ -216,6 +218,10 @@ def smart_title_word(word: str, *, is_first_word: bool = False) -> str:
 
 
 def smart_title_party_text(text: str) -> str:
+    normalized = normalize_legal_display_title(text)
+    if normalized != text:
+        return normalized
+
     parts = re.split(r"([^A-Za-zÀ-ÖØ-öø-ÿ0-9'’.-]+)", text)
     output: list[str] = []
     word_count = 0
@@ -250,7 +256,7 @@ def titlecase_parties_before_year(citation: str) -> str:
     rest = citation[match.start() :].strip()
     if not parties:
         return citation
-    return f"{smart_title_party_text(parties)} {rest}".strip()
+    return f"{normalize_legal_display_title(parties)} {rest}".strip()
 
 
 def strip_juta_source_noise(text: str) -> str:

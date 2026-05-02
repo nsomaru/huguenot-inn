@@ -4,19 +4,35 @@ All notable changes to **Huguenot Inn** are documented here.
 
 ## [Unreleased]
 
+## [0.4.2.4a] - 2026-05-02
+
 ### Added
 
 - Added a tag-triggered GitHub Actions release workflow that builds unsigned Linux Flatpak, macOS DMG, and Windows MSI artifacts and publishes a GitHub release with generated notes.
 - Added release-version and artifact-set validation helpers so pushed version tags must match the project/runtime version and releases attach exactly the three expected artifacts.
 - Added Flatpak packaging metadata, generated Python dependency manifest support, and Windows PyInstaller/WiX MSI packaging configuration.
+- Added shared page-numbering defaults so UI, PDF bundling, and application protocols consistently default to top-right page numbers at 12 pt with the existing 28 pt margin.
+- Added conservative Afrikaans/South African legal title-casing support for authority detection, DOCX authority indexes, ReportLab authority indexes, and generated PDF ToC titles.
+
+### Changed
+
+- Page-number rectangles now scale with the active number font size and text width, and default to a transparent background while retaining the border.
+- PDF bundling APIs now support omitted page-number position, font-size, and margin arguments through shared defaults.
 
 ### Fixed
 
 - Extended LibreOffice detection to cover Linux package paths, Linux Flatpak exports, and common Windows installation directories while preserving PATH and macOS bundle precedence.
+- Fixed Afrikaans all-caps legal/corporate case titles such as `S V BOTHA EN 'N ANDER`, `(EDMS) BPK`, and `T/A` so generated legal outputs use accepted South African citation casing without translating language boundaries or altering citations.
+- Preserved no-matter bundle behavior, front-index numbering semantics, English title behavior, citations, initials, acronyms, brands, and already-correct mixed-case titles while applying the new title-casing rules.
 
 ### Tests
 
 - Added regression coverage for release workflow shape, version/artifact validation, Flatpak packaging contracts, Windows MSI packaging contracts, macOS unsigned artifact naming, and Windows/Linux LibreOffice detection.
+- Added fixture coverage for Afrikaans legal title casing, corporate abbreviations in South African case citations, citation-tail preservation, title-casing guardrails, UI/PDF default parity, page-number geometry scaling, transparent page-number rectangles, authority detection, DOCX index output, and ReportLab fallback output.
+
+### Verification
+
+- Verified with Ruff formatting, Ruff lint, Pyright, Pytest, and Bandit.
 
 ## [0.4.1a] - 2026-05-02
 

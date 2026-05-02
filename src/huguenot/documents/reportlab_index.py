@@ -9,6 +9,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
 from huguenot.domain import DocumentHeaderInput, Matter, PartySide, PDFItem, party_label
+from huguenot.domain.legal_titles import normalize_legal_display_title
 
 from .authorities_index import get_index_entries
 from .settings import FontResolver, ResolvedIndexFont
@@ -65,7 +66,8 @@ class ReportLabIndexRenderer:
         page_index = 0
         y = self._draw_table_header(c, y, width)
         for number, item, page_range in get_index_entries(pdf_items, start_page=start_page):
-            lines = self._wrap_text(item.title, width - 100 * mm, self.font.reportlab_regular, 10)
+            item_title = normalize_legal_display_title(item.title)
+            lines = self._wrap_text(item_title, width - 100 * mm, self.font.reportlab_regular, 10)
             row_height = max(11 * mm, (len(lines) * 4.4 + 5) * mm)
             if y - row_height < 28 * mm:
                 c.showPage()

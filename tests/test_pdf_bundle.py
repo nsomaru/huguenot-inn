@@ -1,9 +1,14 @@
+import inspect
 from pathlib import Path
+from typing import Any
 
 import fitz
 
+from huguenot.application import protocols
 from huguenot.domain import PDFItem
+from huguenot.domain.page_numbering import DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN, DEFAULT_NUMBER_POSITION
 from huguenot.pdf import combine_number_and_add_toc, combine_with_front_index
+from huguenot.pdf.bundle import draw_page_number, get_number_box, number_box_size
 
 
 def make_pdf(path: Path, text: str, pages: int = 1) -> None:
@@ -38,6 +43,17 @@ def test_combine_number_and_add_toc_preserves_no_matter_behavior(tmp_path: Path)
         assert doc.get_toc() == [[1, "First authority", 1], [1, "Second authority", 2]]
     finally:
         doc.close()
+
+
+def test_numbering_defaults_are_shared_without_pdf_import_in_protocols() -> None:
+    assert DEFAULT_NUMBER_POSITION == "Top right"
+    assert DEFAULT_NUMBER_FONT_SIZE == 12
+    assert DEFAULT_NUMBER_MARGIN == 28
+    signature = inspect.signature(protocols.PdfBundler.combine_number_and_add_toc)
+    assert signature.parameters["position"].default == DEFAULT_NUMBER_POSITION
+    assert signature.parameters["font_size"].default == DEFAULT_NUMBER_FONT_SIZE
+    assert signature.parameters["margin"].default == DEFAULT_NUMBER_MARGIN
+    assert "huguenot.pdf" not in inspect.getsource(protocols)
 
 
 def test_combine_with_front_index_adds_link_to_target_page(tmp_path: Path) -> None:
@@ -95,5 +111,69 @@ def test_combine_with_front_index_numbers_attached_documents_from_one(tmp_path: 
         assert "2" in doc[2].get_text()
         assert doc[0].get_links()[0]["page"] == 2
         assert doc.get_toc() == [[1, "Index", 1], [1, "First authority", 2], [1, "Second authority", 3]]
+    finally:
+        doc.close()
+
+
+def test_bundle_functions_use_default_position_font_and_margin(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    index = tmp_path / "index.pdf"
+    output = tmp_path / "combined.pdf"
+    front_output = tmp_path / "front.pdf"
+    make_pdf(source, "Authority", pages=1)
+    make_pdf(index, "Index", pages=1)
+    calls: list[tuple[int, str, int, int]] = []
+
+    def fake_draw_page_number(
+        page: fitz.Page, number: int, position: str, font_size: int = 12, margin: int = 28
+    ) -> None:
+        calls.append((number, position, font_size, margin))
+
+    monkeypatch.setattr("huguenot.pdf.bundle.draw_page_number", fake_draw_page_number)
+
+    combine_number_and_add_toc([PDFItem(source, "Authority")], output)
+    combine_with_front_index([PDFItem(source, "Authority")], index, [], front_output)
+
+    assert calls == [
+        (1, DEFAULT_NUMBER_POSITION, DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN),
+        (1, DEFAULT_NUMBER_POSITION, DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN),
+    ]
+
+
+def test_number_box_size_scales_with_font_and_text_width() -> None:
+    small = number_box_size("9", font_size=12)
+    large_font = number_box_size("9", font_size=24)
+    multi_digit = number_box_size("100", font_size=12)
+
+    assert large_font.width > small.width
+    assert large_font.height > small.height
+    assert multi_digit.width > small.width
+
+
+def test_get_number_box_default_top_right_geometry() -> None:
+    size = number_box_size("1", font_size=DEFAULT_NUMBER_FONT_SIZE)
+    box = get_number_box(
+        fitz.Rect(0, 0, 200, 300),
+        DEFAULT_NUMBER_POSITION,
+        size.width,
+        size.height,
+        DEFAULT_NUMBER_MARGIN,
+    )
+
+    assert box.x1 == 200 - DEFAULT_NUMBER_MARGIN
+    assert box.y0 == DEFAULT_NUMBER_MARGIN
+
+
+def test_draw_page_number_uses_transparent_rectangle_background(tmp_path: Path) -> None:
+    output = tmp_path / "numbered.pdf"
+    doc = fitz.open()
+    try:
+        page = doc.new_page()
+        draw_page_number(page, 1, DEFAULT_NUMBER_POSITION, DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN)
+        drawings: list[dict[str, Any]] = page.get_drawings()
+        number_rects = [drawing for drawing in drawings if drawing.get("type") in {"s", "fs"}]
+        assert number_rects
+        assert all(drawing.get("fill") is None or drawing.get("fill_opacity") == 0 for drawing in number_rects)
+        doc.save(output)
     finally:
         doc.close()

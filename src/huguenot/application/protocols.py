@@ -3,7 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from huguenot.domain import Court, DocumentHeaderInput, Matter, PDFItem
+from huguenot.domain import (
+    DEFAULT_NUMBER_FONT_SIZE,
+    DEFAULT_NUMBER_MARGIN,
+    DEFAULT_NUMBER_POSITION,
+    Court,
+    DocumentHeaderInput,
+    Matter,
+    PDFItem,
+)
 
 
 class MatterRepository(Protocol):
@@ -46,9 +54,9 @@ class PdfBundler(Protocol):
         self,
         pdf_items: list[PDFItem],
         output_path: Path,
-        position: str,
-        font_size: int,
-        margin: int,
+        position: str = DEFAULT_NUMBER_POSITION,
+        font_size: int = DEFAULT_NUMBER_FONT_SIZE,
+        margin: int = DEFAULT_NUMBER_MARGIN,
     ) -> None: ...
 
     def combine_with_front_index(
@@ -57,9 +65,9 @@ class PdfBundler(Protocol):
         index_pdf_path: Path,
         index_links: list[dict[str, int | float]],
         output_path: Path,
-        position: str,
-        font_size: int,
-        margin: int,
+        position: str = DEFAULT_NUMBER_POSITION,
+        font_size: int = DEFAULT_NUMBER_FONT_SIZE,
+        margin: int = DEFAULT_NUMBER_MARGIN,
         *,
         toc_root_title: str = "Index",
     ) -> None: ...

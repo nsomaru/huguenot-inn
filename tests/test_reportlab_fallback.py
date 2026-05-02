@@ -50,6 +50,34 @@ def test_reportlab_fallback_renders_pdf_and_link_rects(tmp_path: Path) -> None:
     assert links and links[0]["target_page"] == 0
 
 
+def test_reportlab_fallback_normalizes_afrikaans_authority_titles(tmp_path: Path) -> None:
+    source = tmp_path / "authority.pdf"
+    make_pdf(source, "Authority")
+    output = tmp_path / "index.pdf"
+    matter = Matter(
+        court=Court("IN THE HIGH COURT OF SOUTH AFRICA", "(GAUTENG DIVISION, JOHANNESBURG)"),
+        proceeding_type=ProceedingType.APPLICATION,
+        case_number="2026-086328",
+        parties=(
+            Party("Axim (Pty) Ltd", PartySide.BRINGING, 1),
+            Party("Moodie", PartySide.OPPOSING, 1),
+        ),
+    )
+
+    ReportLabIndexRenderer().render_pdf(
+        matter,
+        DocumentHeaderInput("Respondents' Authorities Bundle"),
+        [PDFItem(source, "S V BOTHA EN 'N ANDER")],
+        output,
+    )
+
+    doc = fitz.open(output)
+    try:
+        assert "S v Botha en 'n Ander" in doc[0].get_text()
+    finally:
+        doc.close()
+
+
 def test_matter_index_pdf_falls_back_when_libreoffice_missing(tmp_path: Path) -> None:
     source = tmp_path / "authority.pdf"
     make_pdf(source, "Authority")
