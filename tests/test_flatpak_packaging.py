@@ -52,6 +52,7 @@ def test_flatpak_manifest_includes_generated_python_dependencies() -> None:
     assert "flatpak-pip-generator" in workflow
     assert "--requirements-file=packaging/flatpak/requirements.txt" in workflow
     assert "test -s packaging/flatpak/python3-dependencies.json" in workflow
+    assert "requirements-parser" in workflow
     for dependency in (
         "hatchling",
         "platformdirs",
