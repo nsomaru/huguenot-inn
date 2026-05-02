@@ -2,6 +2,16 @@
 
 All notable changes to **Huguenot Inn** are documented here.
 
+## [0.4.1a] - 2026-05-02
+
+### Fixed
+
+- Fixed PyInstaller startup migrations by bundling the `yoyo-migrations` entry-point metadata and SQLite backend module required for yoyo backend discovery in frozen builds.
+
+### Tests
+
+- Added regression coverage for PyInstaller yoyo SQLite backend packaging requirements.
+
 ## [0.4.0a] - 2026-05-02
 
 ### Fixed

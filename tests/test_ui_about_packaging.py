@@ -25,6 +25,14 @@ def test_pyinstaller_spec_can_build_from_png_icon_source() -> None:
     assert 'collect_submodules("docx2pdf")' in spec
 
 
+def test_pyinstaller_spec_bundles_yoyo_sqlite_backend_metadata() -> None:
+    spec = Path("packaging/huguenot-inn.spec").read_text()
+
+    assert "copy_metadata" in spec
+    assert 'copy_metadata("yoyo-migrations")' in spec
+    assert '"yoyo.backends.core.sqlite3"' in spec
+
+
 def test_about_uses_generated_small_icon() -> None:
     path = about_icon_path()
     assert path.name == "huguenot-inn-icon-64.png"

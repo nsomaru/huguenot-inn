@@ -5,7 +5,7 @@ from pathlib import Path
 import importlib.util
 import tomllib
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 APP_NAME = "Huguenot Inn"
 BUNDLE_IDENTIFIER = "com.nikhilsomaru.huguenotinn"
@@ -26,10 +26,12 @@ GENERATED_ICON_PATHS = generate_icons_module.generate_icons(PROJECT_ROOT / "pack
 # PyInstaller may not infer from imports alone. Keep them explicit in the spec.
 datas = collect_data_files("tkinterdnd2")
 datas += collect_data_files("huguenot.persistence", includes=["migrations/*.sql"])
+datas += copy_metadata("yoyo-migrations")
 datas += [(str(ICON_PNG_PATH), "assets")]
 datas += [(str(path), "assets") for path in GENERATED_ICON_PATHS]
 hiddenimports = collect_submodules("tkinterdnd2")
 hiddenimports += collect_submodules("docx2pdf")
+hiddenimports += ["yoyo.backends.core.sqlite3"]
 
 
 a = Analysis(
