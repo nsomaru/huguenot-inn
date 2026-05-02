@@ -17,6 +17,7 @@ VERSION = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["project"
 # tkinterdnd2 ships platform-specific tkdnd Tcl/native-library resources that
 # PyInstaller may not infer from imports alone. Keep them explicit in the spec.
 datas = collect_data_files("tkinterdnd2")
+datas += collect_data_files("huguenot.persistence", includes=["migrations/*.sql"])
 hiddenimports = collect_submodules("tkinterdnd2")
 
 

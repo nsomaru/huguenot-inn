@@ -38,3 +38,6 @@ uv.lock
 
 # Generated macOS packaging artifacts
 packaging/assets/*.icns
+
+# Example files for the agent
+examples/

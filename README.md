@@ -10,11 +10,38 @@ Features:
 - create PDF bookmarks / table of contents
 - auto-detect case citations for authority bundles
 - generate a Word authorities index
+- create and reopen persisted matters with South African court metadata
+- generate a matter bundle with a front authorities index, or keep the editable `.docx` index and PDF bundle separate
 
 ## Install from source
 
 ```bash
 python -m pip install .
+```
+
+## Matters and local data
+
+Use **File > New Matter** to create a matter, or **File > Open/Select Matter** to reopen one. Matters are stored in a local SQLite database under the operating system's app-data location for `Huguenot Inn`. On first startup, migrations create the schema and seed a curated South African court/header list. User-added courts and header lines are saved in the same database.
+
+When no matter is active, bundle and authorities-index generation keeps the original behavior. When a matter is active:
+
+- **Create combined numbered PDF** generates a single PDF with the matter-style authorities index at the front and page-range links into the bundle.
+- **Create PDF bundle only** generates the numbered PDF bundle without a front index.
+- **Create authorities index (.docx)** generates the editable matter index document.
+
+LibreOffice is used when available for higher-fidelity `.docx` to PDF conversion of the matter index. If LibreOffice is not installed or conversion fails, the app prompts the user and falls back to a pure-Python PDF renderer.
+
+## Development
+
+The project uses `uv` for dependency management and the quality gates.
+
+```bash
+uv sync
+uv run ruff format .
+uv run ruff check .
+uv run pyright
+uv run pytest
+uv run bandit -r src
 ```
 
 ## Build the macOS DMG
