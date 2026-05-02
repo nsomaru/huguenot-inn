@@ -15,7 +15,10 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - name: Validate version tag
         id: version
         shell: bash
@@ -28,6 +31,7 @@ jobs:
           python /tmp/flatpak-builder-tools/pip/flatpak-pip-generator \
             --requirements-file=packaging/flatpak/requirements.txt \
             --output=packaging/flatpak/python3-dependencies
+          test -s packaging/flatpak/python3-dependencies.json
       - name: Build Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
@@ -35,7 +39,7 @@ jobs:
           manifest-path: packaging/flatpak/com.nikhilsomaru.HuguenotInn.yml
           cache-key: flatpak-builder-${{ github.sha }}
       - name: Upload Flatpak artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Huguenot-Inn-${{ steps.version.outputs.version }}-Linux-x86_64.flatpak
           path: Huguenot-Inn-${{ steps.version.outputs.version }}-Linux-x86_64.flatpak
@@ -47,7 +51,10 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - name: Validate version tag
         id: version
         shell: bash
@@ -59,7 +66,7 @@ jobs:
       - name: Build DMG
         run: scripts/build_macos_dmg.sh
       - name: Upload DMG artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Huguenot-Inn-${{ steps.version.outputs.version }}-macOS-arm64.dmg
           path: dist/Huguenot-Inn-${{ steps.version.outputs.version }}-macOS-arm64.dmg
@@ -71,7 +78,10 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - name: Validate version tag
         id: version
         shell: bash
@@ -83,12 +93,17 @@ jobs:
         run: python -m pip install -e '.[packaging]'
       - name: Install WiX Toolset
         shell: pwsh
-        run: dotnet tool install --global wix
+        run: |
+          dotnet tool install --global wix --version 6.0.2
+          $WixToolsPath = "$env:USERPROFILE\.dotnet\tools"
+          $WixToolsPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$WixToolsPath;$env:PATH"
+          wix --version
       - name: Build MSI
         shell: pwsh
         run: scripts/build_windows_msi.ps1
       - name: Upload MSI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Huguenot-Inn-${{ steps.version.outputs.version }}-Windows-x64.msi
           path: dist/Huguenot-Inn-${{ steps.version.outputs.version }}-Windows-x64.msi
@@ -104,9 +119,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - name: Download release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
           merge-multiple: true

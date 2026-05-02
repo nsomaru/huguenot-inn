@@ -51,3 +51,18 @@ def test_release_workflow_downloads_and_validates_three_artifacts() -> None:
         "Huguenot-Inn-${{ needs.build-windows-msi.outputs.version }}-Windows-x64.msi",
     ):
         assert pattern in text
+
+
+def test_release_workflow_pins_python_for_python_steps() -> None:
+    text = workflow_text()
+
+    assert "actions/setup-python@v6" in text
+    assert text.count("python-version: '3.11'") == 4
+
+
+def test_release_workflow_uses_node24_actions() -> None:
+    text = workflow_text()
+
+    assert "actions/checkout@v6" in text
+    assert "actions/upload-artifact@v7" in text
+    assert "actions/download-artifact@v8" in text

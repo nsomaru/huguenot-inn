@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 from pathlib import Path
 
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path
@@ -12,8 +13,13 @@ def test_about_metadata_contains_required_notice() -> None:
     assert ABOUT_METADATA.contact == "nikhil@capebar.co.za"
 
 
-def test_packaged_icon_source_matches_new_icon() -> None:
-    assert Path("packaging/assets/huguenot-inn-icon.png").read_bytes() == Path("examples/new_icon.png").read_bytes()
+def test_packaged_icon_source_is_tracked_release_asset() -> None:
+    icon_path = Path("packaging/assets/huguenot-inn-icon.png")
+
+    assert icon_path.is_file()
+    tracked = subprocess.run(["git", "ls-files", str(icon_path)], check=True, capture_output=True, text=True).stdout
+    assert str(icon_path) in tracked.splitlines()
+    assert "examples/new_icon.png" not in Path("packaging/generate_icons.py").read_text()
 
 
 def test_pyinstaller_spec_can_build_from_png_icon_source() -> None:
@@ -114,18 +120,18 @@ def test_pyinstaller_spec_preserves_macos_bundle_display_name() -> None:
     assert '"CFBundleDisplayName": APP_NAME' in spec
 
 
-def test_icon_generation_uses_new_icon_and_resize_only(monkeypatch, tmp_path: Path) -> None:
+def test_icon_generation_uses_committed_asset_and_resize_only(monkeypatch, tmp_path: Path) -> None:
     spec = importlib.util.spec_from_file_location("generate_icons", "packaging/generate_icons.py")
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
 
-    source_dir = tmp_path / "examples"
-    asset_dir = tmp_path / "assets"
-    source_dir.mkdir()
+    source_dir = tmp_path / "packaging" / "assets"
+    asset_dir = tmp_path / "generated-assets"
+    source_dir.mkdir(parents=True)
     asset_dir.mkdir()
-    source = source_dir / "new_icon.png"
+    source = source_dir / "huguenot-inn-icon.png"
     source.write_bytes(b"icon")
     commands = []
 
@@ -157,11 +163,11 @@ def test_icon_generation_without_magick_reuses_existing_assets_or_fails(monkeypa
     assert spec.loader is not None
     spec.loader.exec_module(module)
 
-    source_dir = tmp_path / "examples"
+    source_dir = tmp_path / "packaging" / "assets"
     asset_dir = tmp_path / "assets"
-    source_dir.mkdir()
+    source_dir.mkdir(parents=True)
     asset_dir.mkdir()
-    (source_dir / "new_icon.png").write_bytes(b"large-source")
+    (source_dir / "huguenot-inn-icon.png").write_bytes(b"large-source")
     for size in module.ICON_SIZES:
         (asset_dir / f"huguenot-inn-icon-{size}.png").write_bytes(f"prebuilt-{size}".encode())
 

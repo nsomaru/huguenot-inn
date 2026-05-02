@@ -10,7 +10,7 @@ ICON_SIZES = (16, 32, 64, 128, 256)
 
 def generate_icons(asset_dir: Path | None = None) -> list[Path]:
     root = asset_dir or PROJECT_ROOT / "packaging" / "assets"
-    source = PROJECT_ROOT / "examples" / "new_icon.png"
+    source = PROJECT_ROOT / "packaging" / "assets" / "huguenot-inn-icon.png"
     if not source.exists():
         raise FileNotFoundError(source)
 
