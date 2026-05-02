@@ -12,6 +12,7 @@ from huguenot.domain import DocumentHeaderInput, Matter, PDFItem
 from .authorities_index import create_matter_authorities_index_docx, get_index_entries
 from .converter import LibreOfficeConverter
 from .reportlab_index import ReportLabIndexRenderer
+from .settings import FontResolver, PDFRenderer, RendererPreference, choose_pdf_renderer
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,9 +24,18 @@ def render_matter_index_pdf(
     output_path: Path,
     *,
     converter: LibreOfficeConverter | None = None,
+    renderer_preference: RendererPreference | None = None,
+    font_name: str | None = None,
 ) -> tuple[bool, list[dict[str, int | float]]]:
     converter = converter or LibreOfficeConverter()
-    if converter.libreoffice_available():
+    renderer_preference = renderer_preference or RendererPreference()
+    font = FontResolver().resolve(font_name)
+    try:
+        renderer = choose_pdf_renderer(renderer_preference, libreoffice_available=converter.libreoffice_available)
+    except RuntimeError:
+        raise
+
+    if renderer is PDFRenderer.LIBREOFFICE:
         try:
             links = _render_with_bundle_page_numbers(
                 output_path,
@@ -36,14 +46,17 @@ def render_matter_index_pdf(
                     path,
                     converter,
                     start_page=start_page,
+                    font_name=font.family,
                 ),
             )
             return True, links
         except Exception as exc:
+            if renderer_preference.renderer is PDFRenderer.LIBREOFFICE:
+                raise
             # Fall back rather than failing the user-facing bundle generation path.
             LOGGER.info("LibreOffice matter index rendering failed; falling back to ReportLab: %s", exc)
 
-    renderer = ReportLabIndexRenderer()
+    renderer = ReportLabIndexRenderer(font=font)
     links = _render_with_bundle_page_numbers(
         output_path,
         lambda path, start_page: renderer.render_pdf(
@@ -61,19 +74,7 @@ def _render_with_bundle_page_numbers(
     output_path: Path,
     render: Callable[[Path, int], list[dict[str, int | float]]],
 ) -> list[dict[str, int | float]]:
-    with tempfile.TemporaryDirectory() as tmp:
-        draft_path = Path(tmp) / "draft-index.pdf"
-        render(draft_path, 1)
-        first_document_page = _pdf_page_count(draft_path) + 1
-    return render(output_path, first_document_page)
-
-
-def _pdf_page_count(path: Path) -> int:
-    doc = fitz.open(path)
-    try:
-        return doc.page_count
-    finally:
-        doc.close()
+    return render(output_path, 1)
 
 
 def _render_with_libreoffice(
@@ -84,11 +85,19 @@ def _render_with_libreoffice(
     converter: LibreOfficeConverter,
     *,
     start_page: int,
+    font_name: str,
 ) -> list[dict[str, int | float]]:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         docx_path = tmp_path / "matter_index.docx"
-        create_matter_authorities_index_docx(matter, document_header, pdf_items, docx_path, start_page=start_page)
+        create_matter_authorities_index_docx(
+            matter,
+            document_header,
+            pdf_items,
+            docx_path,
+            start_page=start_page,
+            font_name=font_name,
+        )
         converted_pdf = converter.convert_docx_to_pdf(docx_path, tmp_path)
         output_path.write_bytes(converted_pdf.read_bytes())
 
@@ -104,24 +113,27 @@ def _find_page_range_links(
     doc = fitz.open(index_pdf_path)
     links: list[dict[str, int | float]] = []
     try:
-        for _number, _item, page_range in get_index_entries(pdf_items, start_page=start_page):
-            text = page_range.display()
+        for _number, item, page_range in get_index_entries(pdf_items, start_page=start_page):
+            texts = (item.title, page_range.display())
             found = False
             for page_index in range(doc.page_count):
                 page = doc[page_index]
-                for rect in page.search_for(text):
-                    links.append(
-                        {
-                            "index_page": page_index,
-                            "target_page": page_range.start - start_page,
-                            "x0": rect.x0,
-                            "y0": rect.y0,
-                            "x1": rect.x1,
-                            "y1": rect.y1,
-                        }
-                    )
-                    found = True
-                    break
+                for text in texts:
+                    for rect in page.search_for(text):
+                        links.append(
+                            {
+                                "index_page": page_index,
+                                "target_page": page_range.start - start_page,
+                                "x0": rect.x0,
+                                "y0": rect.y0,
+                                "x1": rect.x1,
+                                "y1": rect.y1,
+                            }
+                        )
+                        found = True
+                        break
+                    if found:
+                        break
                 if found:
                     break
             if not found:

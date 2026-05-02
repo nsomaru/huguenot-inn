@@ -65,3 +65,35 @@ def test_combine_with_front_index_adds_link_to_target_page(tmp_path: Path) -> No
         assert links[0]["page"] == 1
     finally:
         doc.close()
+
+
+def test_combine_with_front_index_numbers_attached_documents_from_one(tmp_path: Path) -> None:
+    first = tmp_path / "first.pdf"
+    second = tmp_path / "second.pdf"
+    index = tmp_path / "index.pdf"
+    output = tmp_path / "combined.pdf"
+    make_pdf(first, "First authority", pages=1)
+    make_pdf(second, "Second authority", pages=1)
+    make_pdf(index, "Front index", pages=1)
+
+    combine_with_front_index(
+        [PDFItem(first, "First authority"), PDFItem(second, "Second authority")],
+        index,
+        [{"index_page": 0, "target_page": 1, "x0": 50, "y0": 50, "x1": 150, "y1": 80}],
+        output,
+        "Bottom centre",
+        12,
+        28,
+    )
+
+    doc = fitz.open(output)
+    try:
+        assert doc.page_count == 3
+        assert "Front index" in doc[0].get_text()
+        assert " 1\n" not in f" {doc[0].get_text()}\n"
+        assert "1" in doc[1].get_text()
+        assert "2" in doc[2].get_text()
+        assert doc[0].get_links()[0]["page"] == 2
+        assert doc.get_toc() == [[1, "Index", 1], [1, "First authority", 2], [1, "Second authority", 3]]
+    finally:
+        doc.close()

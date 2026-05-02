@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import fitz
@@ -98,11 +99,11 @@ def combine_number_and_add_toc(
             page = output_doc[index]
             draw_page_number(page, index + 1, position, font_size, margin)
 
-        if toc:
-            output_doc.set_toc(toc)
+        _set_toc(output_doc, toc)
         output_doc.save(output_path, garbage=4, deflate=True)
     finally:
         output_doc.close()
+    _ensure_saved_toc(output_path, toc)
 
 
 def combine_with_front_index(
@@ -140,9 +141,9 @@ def combine_with_front_index(
             finally:
                 source.close()
 
-        for index in range(output_doc.page_count):
+        for index in range(index_page_count, output_doc.page_count):
             page = output_doc[index]
-            draw_page_number(page, index + 1, position, font_size, margin)
+            draw_page_number(page, index - index_page_count + 1, position, font_size, margin)
 
         for link in index_links:
             page_number = int(link["index_page"])
@@ -152,7 +153,33 @@ def combine_with_front_index(
                 rect = fitz.Rect(float(link["x0"]), float(link["y0"]), float(link["x1"]), float(link["y1"]))
                 page.insert_link({"kind": fitz.LINK_GOTO, "from": rect, "page": target_page})
 
-        output_doc.set_toc(toc)
+        _set_toc(output_doc, toc)
         output_doc.save(output_path, garbage=4, deflate=True)
     finally:
         output_doc.close()
+    _ensure_saved_toc(output_path, toc)
+
+
+def _set_toc(doc: fitz.Document, toc: list[list[int | str]]) -> None:
+    if toc:
+        doc.set_toc(toc)
+
+
+def _ensure_saved_toc(output_path: Path, toc: list[list[int | str]]) -> None:
+    """Persist PDF outlines and repair them if a backend produced a file without one."""
+    if not toc:
+        return
+
+    repaired_path: Path | None = None
+    doc = fitz.open(output_path)
+    try:
+        if doc.get_toc():
+            return
+        doc.set_toc(toc)
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, dir=output_path.parent) as handle:
+            repaired_path = Path(handle.name)
+        doc.save(repaired_path, garbage=4, deflate=True)
+    finally:
+        doc.close()
+    if repaired_path is not None:
+        repaired_path.replace(output_path)

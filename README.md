@@ -1,17 +1,23 @@
-# PDF Bundle Numberer
+# Huguenot Inn
 
-Small Tkinter GUI app for creating numbered PDF bundles.
+Huguenot Inn is a small Tkinter desktop app for creating numbered PDF bundles and South African litigation authorities indexes.
 
-Features:
+## Features
 
-- drag and drop multiple PDFs
-- combine them into one PDF
-- add readable page numbers
-- create PDF bookmarks / table of contents
-- auto-detect case citations for authority bundles
-- generate a Word authorities index
-- create and reopen persisted matters with South African court metadata
-- generate a matter bundle with a front authorities index, or keep the editable `.docx` index and PDF bundle separate
+- Drag and drop multiple PDFs into the bundle list.
+- Reorder, remove, clear, edit titles, and auto-detect authority/case titles.
+- Combine PDFs into one numbered bundle.
+- Add readable page numbers with configurable position, size, and margin.
+- Create PDF bookmarks / table of contents for combined bundles.
+- Generate a standalone Word authorities index with page ranges.
+- Create and reopen persisted matters with South African court metadata.
+- Generate a matter bundle with a front authorities index, or keep the editable `.docx` index and PDF bundle separate.
+- Create invisible hyperlinks from front-index rows to the correct authority pages in the combined PDF.
+- Choose the PDF index renderer from **Automatic**, **LibreOffice**, or **ReportLab**.
+- Choose the index output font from a searchable system-font dropdown; Times New Roman is the default with safe backend fallbacks.
+- Render matter headers with court lines, bold case number, party tables, superscript party ordinals, and tramline heading rules based on `examples/header_example.docx`.
+- Use LibreOffice for high-fidelity `.docx` to PDF conversion when available, with a ReportLab fallback renderer.
+- Display application/version/license details from **Help > About Huguenot Inn**.
 
 ## Install from source
 
@@ -23,13 +29,40 @@ python -m pip install .
 
 Use **File > New Matter** to create a matter, or **File > Open/Select Matter** to reopen one. Matters are stored in a local SQLite database under the operating system's app-data location for `Huguenot Inn`. On first startup, migrations create the schema and seed a curated South African court/header list. User-added courts and header lines are saved in the same database.
 
-When no matter is active, bundle and authorities-index generation keeps the original behavior. When a matter is active:
+When no matter is active, bundle and authorities-index generation keeps the original no-matter behavior. When a matter is active:
 
-- **Create combined numbered PDF** generates a single PDF with the matter-style authorities index at the front and page-range links into the bundle.
+- **Create combined numbered PDF** generates a single PDF with the matter-style authorities index at the front, page-range links into the bundle, PDF outline ToC entries, and visible page numbering that starts at the first attached authority document.
 - **Create PDF bundle only** generates the numbered PDF bundle without a front index.
 - **Create authorities index (.docx)** generates the editable matter index document.
 
-LibreOffice is used when available for higher-fidelity `.docx` to PDF conversion of the matter index. If LibreOffice is not installed or conversion fails, the app prompts the user and falls back to a pure-Python PDF renderer.
+LibreOffice is used when available for higher-fidelity `.docx` to PDF conversion of the matter index. The app detects LibreOffice from PATH and common macOS app-bundle locations, probes whether it can run headlessly, and uses an isolated temporary LibreOffice profile during conversion. In **Automatic** renderer mode, the app falls back to the pure-Python ReportLab renderer when LibreOffice is unavailable or conversion fails.
+
+## Advanced output options
+
+The **Advanced** pane controls matter-index output behavior:
+
+- **PDF index renderer**
+  - **Automatic**: use LibreOffice when available and ReportLab otherwise.
+  - **LibreOffice**: require LibreOffice and fail visibly if conversion is unavailable.
+  - **ReportLab**: use the pure-Python renderer directly.
+- **Index font**
+  - Defaults to Times New Roman.
+  - Provides a searchable dropdown of system fonts.
+  - DOCX/LibreOffice output uses the chosen family directly.
+  - ReportLab maps common choices to built-in PDF fonts and falls back deterministically when needed.
+
+## Output formatting
+
+Matter index outputs aim to match the supplied header example closely:
+
+- first and second court header lines are rendered;
+- `CASE NO:` and the case number are bold;
+- parties are rendered in a two-column table instead of tabbed text;
+- party ordinal suffixes such as `1st`, `2nd`, and `3rd` use superscript;
+- document headings use horizontal tramline rules aligned to the parties table;
+- long authority titles wrap inside table cells;
+- wrapped authority titles receive a small hanging indent;
+- DOCX, LibreOffice-rendered PDF, and ReportLab-rendered PDF indexes all include page ranges.
 
 ## Development
 
@@ -53,7 +86,7 @@ The packaging flow creates an unsigned Apple Silicon macOS disk image for **Hugu
 - Apple Silicon Mac (`arm64`)
 - Python 3.11 or newer
 - An active virtual environment
-- macOS command line tools that provide `hdiutil`, `sips`, and `iconutil`
+- macOS command line tools that provide `hdiutil`, `sips`, `iconutil`, and `magick`
 
 Install the application and build-only packaging tools:
 
@@ -68,6 +101,8 @@ scripts/build_macos_dmg.sh
 ```
 
 The output is written to `dist/Huguenot-Inn-<version>-macOS-arm64.dmg`.
+
+The PyInstaller build includes packaged migration files and application icon assets. During the PyInstaller build, `packaging/generate_icons.py` uses Magick to generate smaller icon PNGs for packaged UI use.
 
 ### DMG layout
 
@@ -87,7 +122,7 @@ Custom Finder backgrounds, saved window positioning, code signing, notarization,
 
 ### Opening the unsigned app
 
-This app is not code signed or notarized in the first packaging pass. macOS Gatekeeper may warn that it cannot verify the developer.
+This app is not code signed or notarized in this packaging pass. macOS Gatekeeper may warn that it cannot verify the developer.
 
 If macOS blocks the first launch, use one of Apple's standard unsigned-app flows:
 
@@ -101,7 +136,7 @@ Only open apps from sources you trust.
 After building, you can verify the agreed artifact shape without running app functionality:
 
 ```bash
-DMG="dist/Huguenot-Inn-0.1.0-macOS-arm64.dmg"
+DMG="dist/Huguenot-Inn-0.2.0a-macOS-arm64.dmg"
 hdiutil attach "$DMG"
 ls -la "/Volumes/Huguenot Inn"
 test -d "/Volumes/Huguenot Inn/Huguenot Inn.app"

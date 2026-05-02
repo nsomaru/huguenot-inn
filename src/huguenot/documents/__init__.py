@@ -6,12 +6,26 @@ from .authorities_index import (
 from .converter import LibreOfficeConverter
 from .matter_index_pdf import render_matter_index_pdf
 from .reportlab_index import ReportLabIndexRenderer
+from .settings import (
+    FontResolver,
+    PDFRenderer,
+    RendererPreference,
+    ResolvedIndexFont,
+    choose_pdf_renderer,
+    list_system_fonts,
+)
 
 __all__ = [
+    "PDFRenderer",
+    "FontResolver",
     "LibreOfficeConverter",
     "ReportLabIndexRenderer",
+    "RendererPreference",
+    "ResolvedIndexFont",
+    "choose_pdf_renderer",
     "create_authorities_index_docx",
     "create_matter_authorities_index_docx",
     "get_index_entries",
+    "list_system_fonts",
     "render_matter_index_pdf",
 ]

@@ -2,6 +2,7 @@
 """PyInstaller spec for the Huguenot Inn macOS app bundle."""
 
 from pathlib import Path
+import importlib.util
 import tomllib
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -9,15 +10,24 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 APP_NAME = "Huguenot Inn"
 BUNDLE_IDENTIFIER = "com.nikhilsomaru.huguenotinn"
 PROJECT_ROOT = Path(SPECPATH).parent
-ICON_PATH = PROJECT_ROOT / "packaging" / "assets" / "huguenot-inn-icon.icns"
+ICON_PNG_PATH = PROJECT_ROOT / "packaging" / "assets" / "huguenot-inn-icon.png"
+ICON_ICNS_PATH = PROJECT_ROOT / "packaging" / "assets" / "huguenot-inn-icon.icns"
+ICON_PATH = ICON_ICNS_PATH if ICON_ICNS_PATH.exists() else ICON_PNG_PATH
 ENTRY_PATH = PROJECT_ROOT / "packaging" / "pyinstaller_entry.py"
 SRC_PATH = PROJECT_ROOT / "src"
 VERSION = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["project"]["version"]
+
+generate_icons_spec = importlib.util.spec_from_file_location("generate_icons", PROJECT_ROOT / "packaging" / "generate_icons.py")
+generate_icons_module = importlib.util.module_from_spec(generate_icons_spec)
+generate_icons_spec.loader.exec_module(generate_icons_module)
+GENERATED_ICON_PATHS = generate_icons_module.generate_icons(PROJECT_ROOT / "packaging" / "assets")
 
 # tkinterdnd2 ships platform-specific tkdnd Tcl/native-library resources that
 # PyInstaller may not infer from imports alone. Keep them explicit in the spec.
 datas = collect_data_files("tkinterdnd2")
 datas += collect_data_files("huguenot.persistence", includes=["migrations/*.sql"])
+datas += [(str(ICON_PNG_PATH), "assets")]
+datas += [(str(path), "assets") for path in GENERATED_ICON_PATHS]
 hiddenimports = collect_submodules("tkinterdnd2")
 
 

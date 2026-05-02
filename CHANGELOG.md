@@ -1,0 +1,89 @@
+# Changelog
+
+All notable changes to **Huguenot Inn** are documented here.
+
+## [0.2.0a] - 2026-05-02
+
+### Added
+
+- Added an **Advanced** pane to the main window.
+  - Users can now choose the PDF index renderer: **Automatic**, **LibreOffice**, or **ReportLab**.
+  - Users can now choose the index font from a searchable system-font dropdown.
+  - The default index output font is now **Times New Roman**, with deterministic fallbacks where a backend cannot use that exact face.
+- Added **Help > About Huguenot Inn**.
+  - Displays the application icon, current version, GPLv3 notice, author, and contact details.
+  - Uses a generated smaller icon asset for the modal.
+- Added packaged icon generation for the PyInstaller build.
+  - Magick generates 16, 32, 64, 128, and 256 pixel icon variants from the main icon.
+  - Generated icon variants are included as PyInstaller data assets.
+- Added renderer/font settings code for resolving renderer choice, font fallback, and system font discovery.
+- Added regression tests for renderer choice, font fallback, PDF links, DOCX structure, About metadata, icon packaging, and PyInstaller spec behavior.
+
+### Changed
+
+- Replaced the application icon with the new icon from `examples/new_icon.png`.
+- Cleaned the icon by making only the outer white border transparent while preserving the white interior artwork.
+- Matter bundle page numbering now starts at the first attached document, not at the front index/document-index pages.
+  - Front index pages remain unnumbered.
+  - Attached documents visibly start at page 1.
+  - Existing no-matter bundle numbering behavior remains unchanged.
+- Matter index page ranges now match the attached-document page-numbering scheme.
+  - DOCX, LibreOffice-rendered PDF, and ReportLab-rendered PDF indexes use visible bundle page ranges starting from 1.
+- Matter index headers now more closely follow `examples/header_example.docx`.
+  - Court line 1 and court line 2 are rendered in all matter index outputs.
+  - The parties header is constructed as a table rather than tab-aligned text.
+  - The document heading uses horizontal “tram line” rules.
+  - Tramlines align with the parties table edges in both LibreOffice/DOCX and ReportLab outputs.
+  - ReportLab tramlines are spaced away from the heading text so they do not intersect it.
+- Party ordinal suffixes now render as superscript in DOCX/LibreOffice and ReportLab matter headers.
+- `CASE NO:` and its value are bold in all matter index output paths.
+- DOCX/LibreOffice authorities tables now use fixed widths, cell margins, compact spacing, wrapping-friendly layout, and hanging indents for wrapped authority titles.
+- ReportLab authorities tables now wrap long case names within the item cell and indent continuation lines for readability.
+- Combined matter bundles now persist PDF outline/table-of-contents entries for the front index and every attached authority.
+- Invisible index hyperlinks now target the correct physical pages while preserving visible page-number semantics.
+- PyInstaller packaging now tolerates missing `.icns` by falling back to the PNG icon source and packaging the icon assets.
+
+### Fixed
+
+- Fixed missing PDF outline ToC entries in combined matter bundles.
+- Fixed missing PDF outline ToC behavior when LibreOffice is used for the front index renderer.
+- Fixed LibreOffice detection on macOS by checking common app-bundle executable locations and probing `--headless --version`.
+- Fixed LibreOffice conversion reliability on macOS by using an isolated temporary user profile for headless conversion.
+- Fixed DOCX/LibreOffice party ordinal suffixes rendering too low by using true superscript formatting at normal text size.
+- Fixed ReportLab party ordinal suffixes by drawing the suffix as a superscript-style text segment.
+- Fixed ReportLab heading tramlines intersecting the heading text.
+- Fixed DOCX/LibreOffice table text overrun and unattractive row spacing.
+- Fixed About modal icon sizing by using the generated 64 pixel asset.
+
+### Verification
+
+- Verified with Ruff formatting, Ruff lint, Pyright, Pytest, Bandit, PyInstaller build, and LibreOffice smoke artifacts.
+
+## [0.1.0] - Initial release
+
+### Added
+
+- Added the core Tkinter desktop application for combining PDF files into a single numbered bundle.
+- Added drag-and-drop PDF import using `tkinterdnd2`.
+- Added controls for page number position, page number font size, and page number margin.
+- Added readable page-number boxes directly onto combined PDF pages.
+- Added PDF bookmark/table-of-contents generation for standard combined bundles.
+- Added automatic title detection for authority/case PDFs.
+- Added manual editing and ordering of PDF ToC/index item titles.
+- Added move up, move down, remove, and clear list controls for selected PDFs.
+- Added standalone Word authorities index generation.
+- Added persisted matter support with local SQLite storage.
+  - Matters can be created, reopened, selected, and cleared.
+  - Matter data includes court name, optional second court header line, proceeding type, case number, bringing parties, and opposing parties.
+  - Startup migrations create and update the local database non-interactively.
+  - A curated South African court/header list is seeded for matter creation.
+- Added matter-specific authorities index generation.
+  - Matter indexes include court metadata, case number, party labels, document heading, authority rows, and page ranges.
+  - Users can generate an editable `.docx` matter index.
+  - Users can create a combined matter PDF bundle with a front authorities index.
+- Added LibreOffice-backed `.docx` to PDF conversion for higher-fidelity matter index rendering when LibreOffice is available.
+- Added a pure-Python ReportLab PDF renderer fallback when LibreOffice is unavailable.
+- Added PyMuPDF-based PDF combining, numbering, bookmark, link, and page-count utilities.
+- Added macOS packaging support with PyInstaller and a DMG build script.
+- Added packaged migration files so startup database migrations work in installed builds.
+- Added project quality gates for formatting, linting, type checking, testing, and static security scanning.

@@ -13,13 +13,17 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 from huguenot.application import MatterService
 from huguenot.documents import (
     LibreOfficeConverter,
+    PDFRenderer,
+    RendererPreference,
     create_authorities_index_docx,
     create_matter_authorities_index_docx,
+    list_system_fonts,
     render_matter_index_pdf,
 )
 from huguenot.domain import DocumentHeaderInput, Matter, PDFItem, ProceedingType
 from huguenot.pdf import POSITIONS, combine_number_and_add_toc, combine_with_front_index, detect_authority_index_item
 from huguenot.persistence import SQLiteCourtRepository, SQLiteMatterRepository, create_app_database
+from huguenot.ui.about import ABOUT_METADATA, about_icon_path, app_icon_path
 
 
 class MatterDialog(tk.Toplevel):
@@ -189,7 +193,13 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self.position_var = tk.StringVar(value="Bottom centre")
         self.font_size_var = tk.IntVar(value=15)
         self.margin_var = tk.IntVar(value=28)
+        self.renderer_var = tk.StringVar(value="Automatic")
+        self.index_font_var = tk.StringVar(value="Times New Roman")
+        self._system_fonts = list_system_fonts()
+        self._icon_image: tk.PhotoImage | None = None
+        self._about_icon_image: tk.PhotoImage | None = None
         self._build_ui()
+        self._configure_app_icon()
         self._update_status()
 
     def _build_ui(self) -> None:
@@ -218,6 +228,22 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         ttk.Spinbox(controls, from_=10, to=100, textvariable=self.margin_var, width=5).grid(
             row=0, column=5, sticky="w", padx=(8, 0)
         )
+        advanced = ttk.LabelFrame(controls, text="Advanced", padding=(8, 6))
+        advanced.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(10, 0))
+        ttk.Label(advanced, text="PDF index renderer:").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            advanced,
+            textvariable=self.renderer_var,
+            values=["Automatic", "LibreOffice", "ReportLab"],
+            state="readonly",
+            width=18,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 24))
+        ttk.Label(advanced, text="Index font:").grid(row=0, column=2, sticky="w")
+        font_box = ttk.Combobox(advanced, textvariable=self.index_font_var, values=self._system_fonts, width=30)
+        font_box.grid(row=0, column=3, sticky="ew", padx=(8, 0))
+        font_box.bind("<KeyRelease>", self._filter_font_choices)
+        advanced.columnconfigure(3, weight=1)
+        controls.columnconfigure(5, weight=1)
 
         main = ttk.Frame(outer)
         main.pack(fill="both", expand=True)
@@ -272,7 +298,60 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.destroy)
         menu.add_cascade(label="File", menu=file_menu)
+        help_menu = tk.Menu(menu, tearoff=False)
+        help_menu.add_command(label="About Huguenot Inn", command=self.show_about)
+        menu.add_cascade(label="Help", menu=help_menu)
         self.config(menu=menu)
+
+    def _configure_app_icon(self) -> None:
+        icon_path = app_icon_path()
+        if not icon_path.exists():
+            return
+        try:
+            self._icon_image = tk.PhotoImage(file=str(icon_path))
+            self.iconphoto(True, self._icon_image)
+        except tk.TclError:
+            self._icon_image = None
+
+    def _filter_font_choices(self, _event=None) -> None:
+        query = self.index_font_var.get().lower()
+        matches = [font for font in self._system_fonts if query in font.lower()]
+        widget = self.focus_get()
+        if isinstance(widget, ttk.Combobox):
+            widget.configure(values=matches or self._system_fonts)
+
+    def _renderer_preference(self) -> RendererPreference:
+        value = self.renderer_var.get().lower()
+        renderer = {
+            "libreoffice": PDFRenderer.LIBREOFFICE,
+            "reportlab": PDFRenderer.REPORTLAB,
+        }.get(value, PDFRenderer.AUTOMATIC)
+        return RendererPreference(renderer)
+
+    def show_about(self) -> None:
+        dialog = tk.Toplevel(self)
+        dialog.title("About Huguenot Inn")
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        outer = ttk.Frame(dialog, padding=16)
+        outer.pack(fill="both", expand=True)
+        icon_path = about_icon_path()
+        if icon_path.exists():
+            try:
+                self._about_icon_image = tk.PhotoImage(file=str(icon_path))
+            except tk.TclError:
+                self._about_icon_image = self._icon_image
+        if self._about_icon_image is not None:
+            ttk.Label(outer, image=self._about_icon_image).grid(row=0, column=0, rowspan=5, sticky="n", padx=(0, 12))
+        text = (
+            f"{ABOUT_METADATA.application_name}\n"
+            f"Version {ABOUT_METADATA.version}\n\n"
+            f"{ABOUT_METADATA.license_notice}\n\n"
+            f"Author: {ABOUT_METADATA.author}\n"
+            f"Contact: {ABOUT_METADATA.contact}"
+        )
+        ttk.Label(outer, text=text, justify="left").grid(row=0, column=1, sticky="w")
+        ttk.Button(outer, text="OK", command=dialog.destroy).grid(row=1, column=1, sticky="e", pady=(12, 0))
 
     def _update_status(self, message: str | None = None) -> None:
         matter_text = f"Active matter: {self.active_matter.display_name}" if self.active_matter else "No active matter"
@@ -446,8 +525,10 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                     self.pdf_items,
                     index_pdf,
                     converter=converter,
+                    renderer_preference=self._renderer_preference(),
+                    font_name=self.index_font_var.get(),
                 )
-                if not used_libreoffice:
+                if not used_libreoffice and self.renderer_var.get() == "Automatic":
                     messagebox.showinfo(
                         "LibreOffice not available",
                         "LibreOffice was not available for high-fidelity conversion. "
@@ -529,9 +610,10 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
                     self.pdf_items,
                     output_path,
+                    font_name=self.index_font_var.get(),
                 )
             else:
-                create_authorities_index_docx(self.pdf_items, output_path)
+                create_authorities_index_docx(self.pdf_items, output_path, font_name=self.index_font_var.get())
         except Exception as exc:
             traceback.print_exc()
             messagebox.showerror("Failed", f"Could not create authorities index: {exc}")

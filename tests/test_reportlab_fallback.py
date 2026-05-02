@@ -1,8 +1,9 @@
 from pathlib import Path
 
 import fitz
+from reportlab.lib.units import mm
 
-from huguenot.documents import ReportLabIndexRenderer, render_matter_index_pdf
+from huguenot.documents import PDFRenderer, RendererPreference, ReportLabIndexRenderer, render_matter_index_pdf
 from huguenot.domain import Court, DocumentHeaderInput, Matter, Party, PartySide, PDFItem, ProceedingType
 
 
@@ -80,6 +81,89 @@ def test_matter_index_pdf_falls_back_when_libreoffice_missing(tmp_path: Path) ->
     assert links
     doc = fitz.open(output)
     try:
-        assert "2" in doc[0].get_text()
+        assert "1" in doc[0].get_text()
+    finally:
+        doc.close()
+
+
+def test_matter_index_pdf_reportlab_choice_uses_visible_page_one(tmp_path: Path) -> None:
+    source = tmp_path / "authority.pdf"
+    make_pdf(source, "Authority")
+    output = tmp_path / "index.pdf"
+    matter = Matter(
+        court=Court("IN THE HIGH COURT OF SOUTH AFRICA", "(GAUTENG DIVISION, JOHANNESBURG)"),
+        proceeding_type=ProceedingType.APPLICATION,
+        case_number="2026-086328",
+        parties=(
+            Party("Axim (Pty) Ltd", PartySide.BRINGING, 1),
+            Party("Moodie", PartySide.OPPOSING, 1),
+        ),
+    )
+
+    used_libreoffice, links = render_matter_index_pdf(
+        matter,
+        DocumentHeaderInput("Respondents' Authorities Bundle"),
+        [PDFItem(source, "Authority title")],
+        output,
+        renderer_preference=RendererPreference(PDFRenderer.REPORTLAB),
+    )
+
+    assert used_libreoffice is False
+    assert links and links[0]["target_page"] == 0
+    doc = fitz.open(output)
+    try:
+        text = doc[0].get_text()
+        assert "Authority title\n1\n" in text
+    finally:
+        doc.close()
+
+
+def test_reportlab_party_label_splits_ordinal_for_superscript_drawing() -> None:
+    renderer = ReportLabIndexRenderer()
+
+    assert renderer._ordinal_segments("1st Applicant") == ("1", "st", " Applicant")  # noqa: SLF001
+    assert renderer._ordinal_segments("22nd Defendant") == ("22", "nd", " Defendant")  # noqa: SLF001
+
+
+def test_reportlab_heading_tramlines_are_spaced_from_heading(tmp_path: Path) -> None:
+    source = tmp_path / "authority.pdf"
+    make_pdf(source, "Authority")
+    output = tmp_path / "index.pdf"
+    matter = Matter(
+        court=Court("IN THE HIGH COURT OF SOUTH AFRICA", "(GAUTENG DIVISION, JOHANNESBURG)"),
+        proceeding_type=ProceedingType.APPLICATION,
+        case_number="2026-086328",
+        parties=(
+            Party("First Applicant", PartySide.BRINGING, 1),
+            Party("Second Applicant", PartySide.BRINGING, 2),
+            Party("First Respondent", PartySide.OPPOSING, 1),
+            Party("Second Respondent", PartySide.OPPOSING, 2),
+        ),
+    )
+
+    ReportLabIndexRenderer().render_pdf(
+        matter,
+        DocumentHeaderInput("Respondents' Authorities Bundle"),
+        [PDFItem(source, "Authority title")],
+        output,
+    )
+
+    doc = fitz.open(output)
+    try:
+        drawings = doc[0].get_drawings()
+        horizontal_lines = [
+            item
+            for drawing in drawings
+            for item in drawing["items"]
+            if item[0] == "l" and abs(item[1].y - item[2].y) < 0.1
+        ]
+        assert len(horizontal_lines) >= 2
+        heading_lines = [item for item in horizontal_lines if abs(item[1].x - 24 * mm) < 1]
+        assert len(heading_lines) >= 2
+        assert all(abs(item[2].x - (doc[0].rect.width - 24 * mm)) < 1 for item in heading_lines[:2])
+        assert abs(heading_lines[0][1].y - heading_lines[1][1].y) >= 14 * mm
+        text = doc[0].get_text()
+        assert "1st Applicant" in text
+        assert "2nd Respondent" in text
     finally:
         doc.close()
