@@ -31,15 +31,18 @@ from huguenot.domain import (
 )
 from huguenot.pdf import POSITIONS, combine_number_and_add_toc, combine_with_front_index, detect_authority_index_item
 from huguenot.persistence import SQLiteCourtRepository, SQLiteMatterRepository, create_app_database
+from huguenot.ui import duplicate_dialog
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path, app_icon_path
+from huguenot.ui.duplicate_dialog import ask_duplicate_decision
+from huguenot.ui.platform import configure_app_identity
 
 APP_WINDOW_TITLE = "Huguenot Inn"
 REPORTLAB_RENDERER_LABEL = "ReportLab (default)"
 LIBREOFFICE_RENDERER_LABEL = "LibreOffice"
 WORD_RENDERER_LABEL = "Microsoft Word"
-DUPLICATE_ADD_ANYWAY_LABEL = "Add Anyway"
-DUPLICATE_SKIP_LABEL = "Skip"
-DUPLICATE_SKIP_ALL_LABEL_TEMPLATE = "Skip all {count} duplicates"
+DUPLICATE_ADD_ANYWAY_LABEL = duplicate_dialog.DUPLICATE_ADD_ANYWAY_LABEL
+DUPLICATE_SKIP_LABEL = duplicate_dialog.DUPLICATE_SKIP_LABEL
+DUPLICATE_SKIP_ALL_LABEL_TEMPLATE = duplicate_dialog.DUPLICATE_SKIP_ALL_LABEL_TEMPLATE
 
 
 class MatterDialog(tk.Toplevel):
@@ -195,6 +198,7 @@ class OpenMatterDialog(tk.Toplevel):
 class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__()
+        configure_app_identity(self, APP_WINDOW_TITLE)
         self.title(APP_WINDOW_TITLE)
         self.geometry("900x570")
         self.minsize(800, 500)
@@ -423,42 +427,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             self._update_status(f"Added {added} PDF(s)." if added else "No new PDFs added.")
 
     def _decide_duplicate_pdf(self, duplicate: DuplicatePDF, remaining_duplicates: int) -> DuplicateDecision:
-        dialog = tk.Toplevel(self)
-        dialog.title("Duplicate citation")
-        dialog.transient(self)
-        dialog.resizable(False, False)
-        dialog.grab_set()
-        decision = tk.StringVar(value=DuplicateDecision.SKIP.value)
-        outer = ttk.Frame(dialog, padding=14)
-        outer.pack(fill="both", expand=True)
-        message = (
-            "This PDF appears to duplicate an authority already in the list.\n\n"
-            f"New file: {duplicate.path.name}\n"
-            f"Detected citation: {duplicate.title}\n"
-            f"Existing citation: {duplicate.duplicate_title}\n\n"
-            "Do you want to add it anyway or skip it?"
-        )
-        ttk.Label(outer, text=message, justify="left", wraplength=460).pack(anchor="w")
-        actions = ttk.Frame(outer)
-        actions.pack(fill="x", pady=(14, 0))
-
-        def choose(value: DuplicateDecision) -> None:
-            decision.set(value.value)
-            dialog.destroy()
-
-        ttk.Button(actions, text=DUPLICATE_ADD_ANYWAY_LABEL, command=lambda: choose(DuplicateDecision.ADD_ANYWAY)).pack(
-            side="right", padx=(8, 0)
-        )
-        ttk.Button(actions, text=DUPLICATE_SKIP_LABEL, command=lambda: choose(DuplicateDecision.SKIP)).pack(
-            side="right", padx=(8, 0)
-        )
-        ttk.Button(
-            actions,
-            text=DUPLICATE_SKIP_ALL_LABEL_TEMPLATE.format(count=remaining_duplicates),
-            command=lambda: choose(DuplicateDecision.SKIP_ALL),
-        ).pack(side="right")
-        self.wait_window(dialog)
-        return DuplicateDecision(decision.get())
+        return ask_duplicate_decision(self, duplicate, remaining_duplicates)
 
     def refresh_tree(self) -> None:
         self.tree.delete(*self.tree.get_children())
@@ -474,7 +443,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         if not pdfs:
             messagebox.showwarning("No PDFs", "Please drop one or more PDF files.")
             return
-        self.add_paths(pdfs)
+        self.after_idle(self.add_paths, pdfs)
 
     def add_pdfs_dialog(self) -> None:
         selected = filedialog.askopenfilenames(title="Choose PDFs", filetypes=[("PDF files", "*.pdf")])

@@ -2,6 +2,18 @@
 
 All notable changes to **Huguenot Inn** are documented here.
 
+## [0.3.1a] - 2026-05-02
+
+### Fixed
+
+- Fixed macOS/Tk application identity so the app menu bar uses **Huguenot Inn** instead of inheriting the `python3` process name where supported.
+- Fixed duplicate-citation review launched from drag-and-drop by deferring duplicate handling until after the native drop callback returns.
+- Hardened the duplicate-citation modal lifecycle so it waits for visibility before grabbing input and reliably releases the grab after a decision.
+
+### Tests
+
+- Added regression coverage for macOS app-name configuration, PyInstaller bundle display-name metadata, deferred drag-and-drop duplicate handling, and duplicate modal grab/release behavior.
+
 ## [0.3.0a] - 2026-05-02
 
 ### Added

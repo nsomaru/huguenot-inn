@@ -50,6 +50,49 @@ def test_main_window_title_constant_is_huguenot_inn() -> None:
     assert APP_WINDOW_TITLE == "Huguenot Inn"
 
 
+def test_platform_identity_sets_tk_appname_and_macos_name() -> None:
+    from huguenot.ui.platform import configure_app_identity
+
+    calls = []
+
+    class FakeTk:
+        def call(self, *args):
+            calls.append(args)
+            if args == ("tk", "windowingsystem"):
+                return "aqua"
+            return ""
+
+    class FakeRoot:
+        tk = FakeTk()
+
+    configure_app_identity(FakeRoot(), "Huguenot Inn")
+
+    assert ("tk", "appname", "Huguenot Inn") in calls
+    assert ("tk::mac::SetApplicationName", "Huguenot Inn") in calls
+
+
+def test_platform_identity_ignores_unsupported_tcl_commands() -> None:
+    import tkinter as tk
+
+    from huguenot.ui.platform import configure_app_identity
+
+    class FakeTk:
+        def call(self, *_args):
+            raise tk.TclError("unsupported")
+
+    class FakeRoot:
+        tk = FakeTk()
+
+    configure_app_identity(FakeRoot(), "Huguenot Inn")
+
+
+def test_pyinstaller_spec_preserves_macos_bundle_display_name() -> None:
+    spec = Path("packaging/huguenot-inn.spec").read_text()
+
+    assert '"CFBundleName": APP_NAME' in spec
+    assert '"CFBundleDisplayName": APP_NAME' in spec
+
+
 def test_icon_generation_uses_new_icon_and_resize_only(monkeypatch, tmp_path: Path) -> None:
     spec = importlib.util.spec_from_file_location("generate_icons", "packaging/generate_icons.py")
     assert spec is not None
