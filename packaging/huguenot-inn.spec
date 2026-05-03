@@ -16,6 +16,25 @@ ICON_PATH = ICON_ICNS_PATH if ICON_ICNS_PATH.exists() else ICON_PNG_PATH
 ENTRY_PATH = PROJECT_ROOT / "packaging" / "pyinstaller_entry.py"
 SRC_PATH = PROJECT_ROOT / "src"
 VERSION = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())["project"]["version"]
+DOCLING_MODULE_PACKAGES = (
+    "docling",
+    "docling_core",
+    "docling_parse",
+    "docling_ibm_models",
+    "rapidocr",
+    "pymupdf",
+    "pypdfium2",
+)
+DOCLING_DISTRIBUTIONS = (
+    "docling",
+    "docling-slim",
+    "docling-core",
+    "docling-parse",
+    "docling-ibm-models",
+    "rapidocr",
+    "pymupdf",
+    "pypdfium2",
+)
 
 generate_icons_spec = importlib.util.spec_from_file_location("generate_icons", PROJECT_ROOT / "packaging" / "generate_icons.py")
 generate_icons_module = importlib.util.module_from_spec(generate_icons_spec)
@@ -33,6 +52,13 @@ hiddenimports = collect_submodules("tkinterdnd2")
 hiddenimports += collect_submodules("docx2pdf")
 hiddenimports += ["yoyo.backends.core.sqlite3"]
 
+for package in DOCLING_MODULE_PACKAGES:
+    datas += collect_data_files(package)
+    hiddenimports += collect_submodules(package)
+
+for distribution in DOCLING_DISTRIBUTIONS:
+    datas += copy_metadata(distribution)
+
 
 a = Analysis(
     [str(ENTRY_PATH)],
@@ -40,10 +66,8 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
     noarchive=False,
     optimize=0,
 )

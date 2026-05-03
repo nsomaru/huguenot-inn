@@ -4,6 +4,26 @@ All notable changes to **Huguenot Inn** are documented here.
 
 ## [Unreleased]
 
+## [0.4.6.2a] - 2026-05-03
+
+### Added
+
+- Added Docling-powered **AI Analyse** support with a local parquet IR cache and an **Analysis** column that shows missing, ready, and in-progress cache state.
+- Added DOCX/RTF source-document import, IR-backed title detection/index row reuse, and a **Tools > Disk usage** cache summary/clear action.
+
+### Fixed
+
+- Fixed packaged-app Docling PDF rejection by explicitly bundling Docling runtime modules, metadata, and data files, and by adding a frozen smoke path for PDF analysis.
+- Improved Docling rejection guidance to flag possible packaged-runtime problems when valid PDFs still fail after repair.
+
+### Tests
+
+- Added regression coverage for Docling analysis, model/cache handling, source import, IR-backed index rows, packaged smoke mode, and Analysis-column UI state.
+
+### Verification
+
+- Verified with Ruff formatting, Ruff lint, Pyright, Pytest, and Bandit.
+
 ## [0.4.6.1a] - 2026-05-03
 
 ### Added

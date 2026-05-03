@@ -1,3 +1,12 @@
+from .document_ir import (
+    DocumentIR,
+    DocumentIRIdentity,
+    DocumentTextItem,
+    IndexIR,
+    OutputGenerationSettings,
+    PageIR,
+    SourceType,
+)
 from .flags import (
     DEFAULT_FLAG_COLOURS,
     FLAG_COLOUR_RE,
@@ -28,9 +37,19 @@ from .models import (
 from .output_names import matter_output_filename, matter_output_root
 from .page_numbering import DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN, DEFAULT_NUMBER_POSITION, NUMBER_POSITIONS
 from .party_labels import party_label
+from .source_documents import SourceDocument, is_supported_source
 from .validation import MatterValidationError, validate_matter
 
 __all__ = [
+    "DocumentIR",
+    "DocumentIRIdentity",
+    "DocumentTextItem",
+    "IndexIR",
+    "OutputGenerationSettings",
+    "PageIR",
+    "SourceDocument",
+    "SourceType",
+    "is_supported_source",
     "BundleOutputMode",
     "BundleIndexEntry",
     "BundleIndexRow",

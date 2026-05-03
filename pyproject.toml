@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "huguenot-inn"
-version = "0.4.6.1a"
+version = "0.4.6.2a"
 description = "Small GUI tool to combine PDFs, add page numbers, create PDF bookmarks, and generate an authorities index."
 requires-python = ">=3.11"
 authors = [
@@ -18,6 +18,8 @@ dependencies = [
   "yoyo-migrations>=9,<10",
   "tkinterdnd2>=0.4,<1",
   "docx2pdf>=0.1.8,<0.2",
+  "docling>=2.92.0",
+  "pyarrow>=24.0.0",
 ]
 
 [dependency-groups]

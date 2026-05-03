@@ -45,6 +45,14 @@ class FakeTree:
         self._selection = (str(iid),)
 
 
+class FakeIRCache:
+    def __init__(self, cached_checksums: set[str] | None = None) -> None:
+        self.cached_checksums = cached_checksums or set()
+
+    def load_source_ir(self, identity):
+        return object() if identity.checksum in self.cached_checksums else None
+
+
 def test_matter_bundle_save_dialog_uses_matter_filename(monkeypatch) -> None:
     app = make_app_shell()
     captured = {}
@@ -122,15 +130,57 @@ def test_ui_mixed_rows_show_blank_order_for_separators_and_pdf_numbers() -> None
         PDFItem(Path("authority.pdf"), "Authority"),
         IndexSeparator("Statutes"),
     ]
+    app.ir_cache = FakeIRCache()  # type: ignore[assignment]
+    app.source_documents = {}
+    app._analysis_in_progress_source_path = None
     fake_tree = FakeTree()
     app.tree = fake_tree  # type: ignore[assignment]
 
     app.refresh_tree()
 
     assert fake_tree.rows == {
-        "0": ("", "Cases"),
-        "1": (1, "Authority"),
-        "2": ("", "Statutes"),
+        "0": ("", "", "Cases"),
+        "1": (1, "❌", "Authority"),
+        "2": ("", "", "Statutes"),
+    }
+
+
+def test_analysis_column_marks_cached_source_ir(tmp_path: Path) -> None:
+    source_path = tmp_path / "authority.pdf"
+    source_path.write_bytes(b"pdf")
+    source = ui_app.SourceDocument.from_path(source_path, display_title="Authority")
+    app = ui_app.PDFCombinerNumbererTOCIndexApp.__new__(ui_app.PDFCombinerNumbererTOCIndexApp)
+    app.bundle_items = [PDFItem(source_path, "Authority")]
+    app.source_documents = {source_path: source}
+    app.ir_cache = FakeIRCache({source.checksum})  # type: ignore[assignment]
+    app._analysis_in_progress_source_path = None
+    fake_tree = FakeTree()
+    app.tree = fake_tree  # type: ignore[assignment]
+
+    app.refresh_tree()
+
+    assert fake_tree.rows == {"0": (1, "✅", "Authority")}
+
+
+def test_analysis_column_marks_currently_analysed_source_as_in_progress(tmp_path: Path) -> None:
+    first_path = tmp_path / "first.pdf"
+    second_path = tmp_path / "second.pdf"
+    first_path.write_bytes(b"first")
+    second_path.write_bytes(b"second")
+    second_source = ui_app.SourceDocument.from_path(second_path, display_title="Second")
+    app = ui_app.PDFCombinerNumbererTOCIndexApp.__new__(ui_app.PDFCombinerNumbererTOCIndexApp)
+    app.bundle_items = [PDFItem(first_path, "First"), PDFItem(second_path, "Second")]
+    app.source_documents = {second_path: second_source}
+    app.ir_cache = FakeIRCache()  # type: ignore[assignment]
+    app._analysis_in_progress_source_path = second_source.path
+    fake_tree = FakeTree()
+    app.tree = fake_tree  # type: ignore[assignment]
+
+    app.refresh_tree()
+
+    assert fake_tree.rows == {
+        "0": (1, "❌", "First"),
+        "1": (2, "⏳", "Second"),
     }
 
 
@@ -177,3 +227,33 @@ def test_counsel_render_options_disable_only_physical_markers() -> None:
     assert options.flag_colours == ["#3467A5"]
     assert options.physical_flag_markers is False
     assert options.number_fill_opacity == 1.0
+
+
+def test_ai_analyse_and_disk_usage_ui_are_wired_to_thin_callbacks() -> None:
+    ui_source = inspect.getsource(ui_app.PDFCombinerNumbererTOCIndexApp._build_ui)
+    menu_source = inspect.getsource(ui_app.PDFCombinerNumbererTOCIndexApp._build_menu)
+    analyse_source = inspect.getsource(ui_app.PDFCombinerNumbererTOCIndexApp.ai_analyse_selected_sources)
+    status_source = inspect.getsource(ui_app.PDFCombinerNumbererTOCIndexApp._update_status)
+    disk_source = inspect.getsource(ui_app.PDFCombinerNumbererTOCIndexApp.open_disk_usage_dialog)
+
+    assert "AI Analyse" in ui_source
+    assert "Disk usage" in menu_source
+    assert "_docling_analysis_warning" in analyse_source
+    assert "Docling models:" in status_source
+    assert "analysis_service" in analyse_source
+    assert "DiskUsageDialog" in disk_source
+
+
+def test_parse_drop_files_accepts_pdf_docx_and_rtf(monkeypatch, tmp_path: Path) -> None:
+    app = ui_app.PDFCombinerNumbererTOCIndexApp.__new__(ui_app.PDFCombinerNumbererTOCIndexApp)
+    paths = [tmp_path / "a.pdf", tmp_path / "b.docx", tmp_path / "c.rtf", tmp_path / "d.txt"]
+    for path in paths:
+        path.write_text("x")
+
+    class FakeTk:
+        def splitlist(self, data: str):
+            return data.split("|")
+
+    app.tk = FakeTk()  # type: ignore[assignment]
+
+    assert app.parse_drop_files("|".join(str(path) for path in paths)) == paths[:3]

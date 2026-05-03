@@ -1,7 +1,12 @@
+import builtins
 import importlib.util
 import subprocess
+import sys
 import time
+import types
 from pathlib import Path
+
+import pytest
 
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path
 
@@ -32,12 +37,187 @@ def test_pyinstaller_spec_can_build_from_png_icon_source() -> None:
     assert 'collect_submodules("docx2pdf")' in spec
 
 
+def test_pyinstaller_spec_bundles_docling_runtime_modules_data_and_metadata() -> None:
+    spec = Path("packaging/huguenot-inn.spec").read_text()
+
+    for package in (
+        "docling",
+        "docling_core",
+        "docling_parse",
+        "docling_ibm_models",
+        "rapidocr",
+        "pymupdf",
+        "pypdfium2",
+    ):
+        assert f'"{package}"' in spec
+
+    for distribution in (
+        "docling",
+        "docling-slim",
+        "docling-core",
+        "docling-parse",
+        "docling-ibm-models",
+        "rapidocr",
+        "pymupdf",
+        "pypdfium2",
+    ):
+        assert f'"{distribution}"' in spec
+
+    assert "DOCLING_MODULE_PACKAGES" in spec
+    assert "DOCLING_DISTRIBUTIONS" in spec
+    assert "collect_submodules(package)" in spec
+    assert "collect_data_files(package)" in spec
+    assert "copy_metadata(distribution)" in spec
+
+
+def _load_pyinstaller_entry(module_name: str = "pyinstaller_entry_for_test"):
+    spec = importlib.util.spec_from_file_location(module_name, "packaging/pyinstaller_entry.py")
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_pyinstaller_entry_does_not_import_gui_at_module_import_time(monkeypatch) -> None:
+    original_import = builtins.__import__
+
+    def fail_on_huguenot_app_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "huguenot.app" or (name == "huguenot" and "app" in fromlist):
+            msg = "pyinstaller entrypoint imported huguenot.app during module import"
+            raise AssertionError(msg)
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_on_huguenot_app_import)
+
+    module = _load_pyinstaller_entry()
+
+    assert callable(module.main)
+
+
+def test_pyinstaller_entry_runs_freeze_support_before_gui_main(monkeypatch) -> None:
+    module = _load_pyinstaller_entry("pyinstaller_entry_call_order_for_test")
+    calls: list[str] = []
+    fake_huguenot = types.ModuleType("huguenot")
+    fake_app = types.ModuleType("huguenot.app")
+
+    def fake_freeze_support() -> None:
+        calls.append("freeze_support")
+
+    def fake_main() -> None:
+        calls.append("gui_main")
+
+    fake_app.__dict__["main"] = fake_main
+    monkeypatch.setitem(sys.modules, "huguenot", fake_huguenot)
+    monkeypatch.setitem(sys.modules, "huguenot.app", fake_app)
+    monkeypatch.setattr(module.multiprocessing, "freeze_support", fake_freeze_support)
+
+    module.main()
+
+    assert calls == ["freeze_support", "gui_main"]
+
+
+def test_pyinstaller_entry_smoke_mode_analyses_pdf_before_gui_import(monkeypatch, capsys) -> None:
+    module = _load_pyinstaller_entry("pyinstaller_entry_smoke_success_for_test")
+    calls: list[str] = []
+    fake_huguenot = types.ModuleType("huguenot")
+    fake_documents = types.ModuleType("huguenot.documents")
+    fake_domain = types.ModuleType("huguenot.domain")
+    fake_source_documents = types.ModuleType("huguenot.domain.source_documents")
+
+    class FakeSourceDocument:
+        @classmethod
+        def from_path(cls, path: Path) -> tuple[str, Path]:
+            calls.append(f"source:{path}")
+            return ("source", path)
+
+    class FakeDoclingAnalyser:
+        def __init__(self, *, model_artifacts_path: Path | None = None) -> None:
+            calls.append(f"analyser:{model_artifacts_path}")
+
+        def analyse(self, source: tuple[str, Path]):
+            calls.append(f"analyse:{source[1]}")
+            return types.SimpleNamespace(page_count=10, title="Fixture title")
+
+    def fake_freeze_support() -> None:
+        calls.append("freeze_support")
+
+    fake_documents.__dict__["DoclingAnalyser"] = FakeDoclingAnalyser
+    fake_source_documents.__dict__["SourceDocument"] = FakeSourceDocument
+    monkeypatch.setitem(sys.modules, "huguenot", fake_huguenot)
+    monkeypatch.setitem(sys.modules, "huguenot.documents", fake_documents)
+    monkeypatch.setitem(sys.modules, "huguenot.domain", fake_domain)
+    monkeypatch.setitem(sys.modules, "huguenot.domain.source_documents", fake_source_documents)
+    monkeypatch.setenv("HUGUENOT_DOCLING_SMOKE_PDF", "examples/cases/case_1.pdf")
+    monkeypatch.setattr(module.multiprocessing, "freeze_support", fake_freeze_support)
+
+    module.main()
+
+    assert calls == [
+        "freeze_support",
+        "analyser:None",
+        "source:examples/cases/case_1.pdf",
+        "analyse:examples/cases/case_1.pdf",
+    ]
+    output = capsys.readouterr().out
+    assert '"status": "ok"' in output
+    assert '"page_count": 10' in output
+    assert "Fixture title" in output
+    assert "huguenot.app" not in sys.modules
+
+
+def test_pyinstaller_entry_smoke_mode_exits_nonzero_on_analysis_failure(monkeypatch, capsys) -> None:
+    module = _load_pyinstaller_entry("pyinstaller_entry_smoke_failure_for_test")
+    fake_huguenot = types.ModuleType("huguenot")
+    fake_documents = types.ModuleType("huguenot.documents")
+    fake_domain = types.ModuleType("huguenot.domain")
+    fake_source_documents = types.ModuleType("huguenot.domain.source_documents")
+
+    class FakeSourceDocument:
+        @classmethod
+        def from_path(cls, path: Path) -> tuple[str, Path]:
+            return ("source", path)
+
+    class FakeDoclingAnalyser:
+        def __init__(self, *, model_artifacts_path: Path | None = None) -> None:
+            assert model_artifacts_path is None
+
+        def analyse(self, _source: tuple[str, Path]):
+            raise RuntimeError("Docling failed")
+
+    fake_documents.__dict__["DoclingAnalyser"] = FakeDoclingAnalyser
+    fake_source_documents.__dict__["SourceDocument"] = FakeSourceDocument
+    monkeypatch.setitem(sys.modules, "huguenot", fake_huguenot)
+    monkeypatch.setitem(sys.modules, "huguenot.documents", fake_documents)
+    monkeypatch.setitem(sys.modules, "huguenot.domain", fake_domain)
+    monkeypatch.setitem(sys.modules, "huguenot.domain.source_documents", fake_source_documents)
+    monkeypatch.setenv("HUGUENOT_DOCLING_SMOKE_PDF", "examples/cases/case_1.pdf")
+
+    with pytest.raises(SystemExit) as exc_info:
+        module.main()
+
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    assert '"status": "error"' in output
+    assert "Docling failed" in output
+
+
 def test_pyinstaller_spec_bundles_yoyo_sqlite_backend_metadata() -> None:
     spec = Path("packaging/huguenot-inn.spec").read_text()
 
     assert "copy_metadata" in spec
     assert 'copy_metadata("yoyo-migrations")' in spec
     assert '"yoyo.backends.core.sqlite3"' in spec
+
+
+def test_pyinstaller_spec_uses_upstream_torch_hook_without_local_excludes() -> None:
+    spec = Path("packaging/huguenot-inn.spec").read_text()
+
+    assert not Path("packaging/pyinstaller_hooks/hook-torch.py").exists()
+    assert "PYINSTALLER_HOOKS_PATH" not in spec
+    assert "hookspath" not in spec
+    assert "excluded_optional_torch_modules" not in spec
+    assert "torch." not in spec
 
 
 def test_about_uses_generated_small_icon() -> None:

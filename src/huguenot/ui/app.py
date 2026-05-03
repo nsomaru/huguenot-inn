@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import tkinter as tk
 import traceback
 from dataclasses import replace
@@ -10,15 +11,31 @@ from typing import Any, cast
 
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
-from huguenot.application import DuplicateDecision, DuplicatePDF, FlagPaletteService, MatterService, plan_pdf_additions
+from huguenot.application import (
+    AnalysisService,
+    AnalysisStatus,
+    DiskUsageService,
+    DuplicateDecision,
+    DuplicatePDF,
+    FlagPaletteService,
+    IndexRowService,
+    MatterService,
+    MissingIRDecision,
+    SourceImportService,
+    plan_source_additions,
+)
 from huguenot.documents import (
+    DoclingAnalyser,
+    DoclingModelManager,
     Docx2PdfConverter,
+    FilesystemIRCache,
     LibreOfficeConverter,
     PDFRenderer,
     RendererPreference,
     create_authorities_index_docx_from_rows,
     create_matter_authorities_index_docx_from_rows,
-    get_index_rows,
+    default_ir_cache_root,
+    detect_authority_index_item_from_ir,
     list_system_fonts,
     render_matter_index_pdf_from_rows,
 )
@@ -28,14 +45,17 @@ from huguenot.domain import (
     DEFAULT_NUMBER_POSITION,
     BundleListItem,
     DocumentHeaderInput,
+    DocumentIRIdentity,
     IndexSeparator,
     Matter,
+    OutputGenerationSettings,
     PDFItem,
     ProceedingType,
     matter_output_filename,
     matter_output_root,
     pdf_items_from_bundle_items,
 )
+from huguenot.domain.source_documents import SourceDocument, is_supported_source
 from huguenot.pdf import (
     POSITIONS,
     PdfBundleRenderOptions,
@@ -43,6 +63,7 @@ from huguenot.pdf import (
     combine_bundle_items_with_front_index,
     detect_authority_index_item,
 )
+from huguenot.pdf.authority_detection import clean_filename_title
 from huguenot.persistence import (
     SQLiteCourtRepository,
     SQLiteFlagPaletteRepository,
@@ -58,6 +79,9 @@ APP_WINDOW_TITLE = "Huguenot Inn"
 REPORTLAB_RENDERER_LABEL = "ReportLab (default)"
 LIBREOFFICE_RENDERER_LABEL = "LibreOffice"
 WORD_RENDERER_LABEL = "Microsoft Word"
+ANALYSIS_CACHE_MISSING_ICON = "❌"
+ANALYSIS_CACHE_READY_ICON = "✅"
+ANALYSIS_IN_PROGRESS_ICON = "⏳"
 DUPLICATE_ADD_ANYWAY_LABEL = duplicate_dialog.DUPLICATE_ADD_ANYWAY_LABEL
 DUPLICATE_SKIP_LABEL = duplicate_dialog.DUPLICATE_SKIP_LABEL
 DUPLICATE_SKIP_ALL_LABEL_TEMPLATE = duplicate_dialog.DUPLICATE_SKIP_ALL_LABEL_TEMPLATE
@@ -304,6 +328,50 @@ class FlagPaletteDialog(tk.Toplevel):
         self.destroy()
 
 
+class DiskUsageDialog(tk.Toplevel):
+    def __init__(self, parent: tk.Misc, service: DiskUsageService) -> None:
+        super().__init__(parent)
+        self.service = service
+        self.title("Disk usage")
+        self.transient(cast(Any, parent))
+        self.resizable(False, False)
+        outer = ttk.Frame(self, padding=14)
+        outer.pack(fill="both", expand=True)
+        self.usage_label = ttk.Label(outer, text="calculating...")
+        self.usage_label.pack(anchor="w", pady=(0, 10))
+        ttk.Button(outer, text="Clear cache", command=self._clear_cache).pack(side="left")
+        ttk.Button(outer, text="Close", command=self.destroy).pack(side="right")
+        self._calculate_async()
+
+    def _calculate_async(self) -> None:
+        def worker() -> None:
+            try:
+                usage = self.service.calculate()
+            except Exception as exc:
+                self.after(0, self.usage_label.config, {"text": f"Failed to calculate disk usage: {exc}"})
+                return
+            text = (
+                f"SQLite database: {_format_bytes(usage.sqlite_bytes)}\n"
+                f"Parquet cache: {_format_bytes(usage.cache_bytes)}"
+            )
+            self.after(0, self.usage_label.config, {"text": text})
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _clear_cache(self) -> None:
+        removed = self.service.clear_cache()
+        self.usage_label.config(text=f"Cleared {_format_bytes(removed)} from the parquet cache. Recalculating...")
+        self._calculate_async()
+
+
+def _format_bytes(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
 class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__(**root_identity_options(APP_WINDOW_TITLE))
@@ -313,6 +381,14 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self.minsize(800, 500)
 
         database = create_app_database()
+        self.database = database
+        self.ir_cache = FilesystemIRCache()
+        self.docling_model_manager = DoclingModelManager()
+        self._docling_model_status_text = "Docling models: checking"
+        self.source_documents: dict[Path, SourceDocument] = {}
+        self._analysis_warning_shown = False
+        self._analysis_in_progress_source_path: Path | None = None
+        self._analysis_progress_sources: tuple[Path, ...] = ()
         court_repository = SQLiteCourtRepository(database)
         matter_repository = SQLiteMatterRepository(database)
         flag_palette_repository = SQLiteFlagPaletteRepository(database)
@@ -327,6 +403,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self.renderer_var = tk.StringVar(value=REPORTLAB_RENDERER_LABEL)
         self.index_font_var = tk.StringVar(value="Times New Roman")
         self.disable_physical_flag_markers_var = tk.BooleanVar(value=False)
+        self.analysis_progress_var = tk.IntVar(value=0)
         self._system_fonts = list_system_fonts()
         self._icon_image: tk.PhotoImage | None = None
         self._about_icon_image: tk.PhotoImage | None = None
@@ -335,6 +412,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         configure_macos_quit(self, self._close_application)
         self._configure_app_icon()
         self._update_status()
+        self._refresh_docling_model_status_async()
 
     @property
     def pdf_items(self) -> list[PDFItem]:
@@ -396,11 +474,13 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         main.pack(fill="both", expand=True)
         left = ttk.Frame(main)
         left.pack(side="left", fill="both", expand=True)
-        self.tree = ttk.Treeview(left, columns=("order", "title"), show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(left, columns=("order", "analysis", "title"), show="headings", selectmode="browse")
         self.tree.heading("order", text="#")
+        self.tree.heading("analysis", text="Analysis")
         self.tree.heading("title", text="PDF ToC entry / index item")
         self.tree.column("order", width=45, anchor="center", stretch=False)
-        self.tree.column("title", width=650, anchor="w", stretch=True)
+        self.tree.column("analysis", width=80, anchor="center", stretch=False)
+        self.tree.column("title", width=570, anchor="w", stretch=True)
         self.tree.pack(fill="both", expand=True)
         dnd_tree = cast(Any, self.tree)
         dnd_tree.drop_target_register(DND_FILES)
@@ -418,6 +498,10 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         ttk.Button(buttons, text="Add Separator", command=self.add_separator).pack(fill="x", pady=(0, 6))
         ttk.Button(buttons, text="Edit title", command=self.edit_selected_title).pack(fill="x", pady=(0, 6))
         ttk.Button(buttons, text="Auto-detect title", command=self.auto_detect_selected_title).pack(
+            fill="x", pady=(0, 6)
+        )
+        ttk.Button(buttons, text="AI Analyse", command=self.ai_analyse_selected_sources).pack(fill="x", pady=(0, 6))
+        ttk.Progressbar(buttons, variable=self.analysis_progress_var, maximum=100, mode="determinate").pack(
             fill="x", pady=(0, 6)
         )
         ttk.Button(buttons, text="Move up", command=self.move_up).pack(fill="x", pady=(0, 6))
@@ -447,6 +531,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         menu.add_cascade(label="File", menu=file_menu)
         tools_menu = tk.Menu(menu, tearoff=False)
         tools_menu.add_command(label="Flags", command=self.open_flags_dialog)
+        tools_menu.add_command(label="Disk usage", command=self.open_disk_usage_dialog)
         menu.add_cascade(label="Tools", menu=tools_menu)
         help_menu = tk.Menu(menu, tearoff=False)
         help_menu.add_command(label="About Huguenot Inn", command=self.show_about)
@@ -486,6 +571,104 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             return Docx2PdfConverter()
         return LibreOfficeConverter()
 
+    def _source_import_service(self) -> SourceImportService:
+        return SourceImportService(
+            converter=self._document_converter(), converted_pdf_dir=default_ir_cache_root() / "converted-pdfs"
+        )
+
+    def _analysis_service(self) -> AnalysisService:
+        return AnalysisService(
+            cache=self.ir_cache,
+            analyser=DoclingAnalyser(model_artifacts_path=self.docling_model_manager.cache_root),
+            model_manager=self.docling_model_manager,
+        )
+
+    def _disk_usage_service(self) -> DiskUsageService:
+        return DiskUsageService(database_path=self.database.path, cache=self.ir_cache)
+
+    def _index_row_service(self) -> IndexRowService:
+        return IndexRowService(
+            cache=self.ir_cache,
+            generate_missing_ir=self._generate_missing_ir,
+            source_identity_provider=self._source_identity_for_pdf_item,
+        )
+
+    def _source_identity_for_pdf_item(self, item: PDFItem) -> DocumentIRIdentity:
+        source = self._source_for_path(item.path)
+        return DocumentIRIdentity.from_path(source.path, source_type=source.source_type)
+
+    def _output_settings(self, *, header_title: str = "", colour_page_ranges: bool = False) -> OutputGenerationSettings:
+        palette = tuple(self.flag_palette_service.list_palette()) if colour_page_ranges else ()
+        return OutputGenerationSettings(
+            header_title=header_title,
+            index_font=self.index_font_var.get(),
+            colour_page_ranges=colour_page_ranges,
+            flag_colours=palette,
+            physical_flag_markers=not bool(self.disable_physical_flag_markers_var.get()),
+            renderer_preference=self.renderer_var.get(),
+        )
+
+    def _generate_missing_ir(self, missing: tuple[DocumentIRIdentity, ...]) -> None:
+        self._analyse_missing_sources(missing, settings=self._output_settings())
+
+    def _analyse_missing_sources(
+        self, missing: tuple[DocumentIRIdentity, ...], *, settings: OutputGenerationSettings
+    ) -> None:
+        sources = [self._source_for_path(identity.path_as_path) for identity in missing]
+        self._analysis_service().analyse_sources(
+            sources,
+            separator_titles=tuple(item.title for item in self.bundle_items if isinstance(item, IndexSeparator)),
+            matter_context=self.active_matter.display_name if self.active_matter else "",
+            settings=settings,
+        )
+
+    def _source_for_path(self, path: Path) -> SourceDocument:
+        source_documents = getattr(self, "source_documents", {})
+        return source_documents.get(path, SourceDocument.from_path(path, display_title=clean_filename_title(path)))
+
+    def _rows_for_output(
+        self,
+        *,
+        header_title: str = "",
+        colour_page_ranges: bool = False,
+        flag_colours: list[str] | None = None,
+    ):
+        partial_cache = []
+        decision = MissingIRDecision.CONTINUE_LEGACY
+        settings = self._output_settings(header_title=header_title, colour_page_ranges=colour_page_ranges)
+        separator_titles = tuple(item.title for item in self.bundle_items if isinstance(item, IndexSeparator))
+        matter_context = self.active_matter.display_name if self.active_matter else ""
+
+        def warn(partial) -> None:
+            partial_cache.append(partial)
+
+        result = self._index_row_service().build_rows(
+            self.bundle_items,
+            settings=settings,
+            separator_titles=separator_titles,
+            matter_context=matter_context,
+            flag_colours=flag_colours,
+            on_partial_cache=warn,
+            missing_ir_decision=decision,
+        )
+        if partial_cache:
+            generate = messagebox.askyesno(
+                "Partial AI analysis cache",
+                "Some sources do not have cached Docling IR. "
+                "Generate missing IR now? Choose No to continue with legacy output.",
+                parent=self,
+            )
+            if generate:
+                self._analyse_missing_sources(partial_cache[0].missing, settings=settings)
+                result = self._index_row_service().build_rows(
+                    self.bundle_items,
+                    settings=settings,
+                    separator_titles=separator_titles,
+                    matter_context=matter_context,
+                    flag_colours=flag_colours,
+                )
+        return result.rows
+
     def show_about(self) -> None:
         dialog = tk.Toplevel(self)
         dialog.title("About Huguenot Inn")
@@ -515,13 +698,131 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         dialog = FlagPaletteDialog(self, self.flag_palette_service)
         self.wait_window(dialog)
 
+    def open_disk_usage_dialog(self) -> None:
+        DiskUsageDialog(self, self._disk_usage_service())
+
+    def ai_analyse_selected_sources(self) -> None:
+        if not self.pdf_items:
+            messagebox.showwarning("No sources", "Please add one or more source documents first.")
+            return
+        if not self._analysis_warning_shown:
+            proceed = messagebox.askokcancel(
+                "AI Analyse",
+                self._docling_analysis_warning(),
+                parent=self,
+            )
+            if not proceed:
+                return
+            self._analysis_warning_shown = True
+        sources = [self._source_for_path(item.path) for item in self.pdf_items]
+        self._analysis_progress_sources = tuple(source.path for source in sources)
+        self._analysis_in_progress_source_path = None
+        self.refresh_tree()
+        self.analysis_progress_var.set(0)
+        self._update_status("AI Analyse queued...")
+
+        def progress(status: AnalysisStatus) -> None:
+            percentage = self._analysis_progress_percentage(status)
+            self.after(0, self._update_analysis_status, percentage, status)
+
+        def worker() -> None:
+            try:
+                self._analysis_service().analyse_sources(
+                    sources,
+                    separator_titles=tuple(
+                        item.title for item in self.bundle_items if isinstance(item, IndexSeparator)
+                    ),
+                    matter_context=self.active_matter.display_name if self.active_matter else "",
+                    settings=self._output_settings(),
+                    progress=progress,
+                )
+            except Exception as exc:
+                traceback.print_exc()
+                self.after(0, messagebox.showerror, "AI Analyse failed", str(exc))
+                if not self.docling_model_manager.models_ready():
+                    self.after(0, self._set_docling_model_status, "Docling models: not downloaded")
+                self.after(0, self._finish_analysis, "AI Analyse failed.")
+                return
+            self.after(0, self._finish_analysis, "AI Analyse complete.")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_analysis_progress(self, percentage: int, message: str) -> None:
+        self.analysis_progress_var.set(percentage)
+        self._update_status(message)
+
+    def _update_analysis_status(self, percentage: int, status: AnalysisStatus) -> None:
+        if status.stage == "models-checking":
+            self._docling_model_status_text = "Docling models: checking"
+        elif status.stage == "models-downloading":
+            suffix = f" ({status.current}/{status.total})" if status.total else ""
+            self._docling_model_status_text = f"Docling models: downloading{suffix}"
+        elif status.stage == "models-ready":
+            self._docling_model_status_text = "Docling models: ready"
+        self._update_analysis_marker(status)
+        self._update_analysis_progress(percentage, status.message)
+
+    def _update_analysis_marker(self, status: AnalysisStatus) -> None:
+        current_path = getattr(self, "_analysis_in_progress_source_path", None)
+        next_path = current_path
+        if status.stage == "analysing":
+            source_paths = getattr(self, "_analysis_progress_sources", ())
+            next_path = source_paths[status.current - 1] if 1 <= status.current <= len(source_paths) else None
+        elif status.stage in {"queued", "caching", "complete"}:
+            next_path = None
+        if next_path == current_path:
+            return
+        self._analysis_in_progress_source_path = next_path
+        self.refresh_tree()
+
+    def _finish_analysis(self, message: str) -> None:
+        self._analysis_in_progress_source_path = None
+        self.refresh_tree()
+        self._update_status(message)
+
+    def _analysis_progress_percentage(self, status: AnalysisStatus) -> int:
+        if status.stage == "complete":
+            return 100
+        if status.stage == "caching":
+            return 95
+        if status.stage == "queued":
+            return 30
+        if status.stage == "analysing":
+            return 30 + int((status.current / max(status.total, 1)) * 60)
+        if status.stage == "models-ready":
+            return 25
+        if status.stage == "models-downloading":
+            return 5 + int((status.current / max(status.total, 1)) * 20)
+        return 1
+
+    def _docling_analysis_warning(self) -> str:
+        if self.docling_model_manager.models_ready():
+            return "Docling models are already downloaded. Continue with AI Analyse?"
+        return (
+            "Docling models are not downloaded yet. AI Analyse will download them the first time it runs; "
+            "progress will be shown in the status bar. Continue?"
+        )
+
+    def _refresh_docling_model_status_async(self) -> None:
+        def worker() -> None:
+            ready = self.docling_model_manager.models_ready()
+            status = "Docling models: ready" if ready else "Docling models: not downloaded"
+            self.after(0, self._set_docling_model_status, status)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _set_docling_model_status(self, status: str) -> None:
+        self._docling_model_status_text = status
+        self._update_status()
+
     def _update_status(self, message: str | None = None) -> None:
         matter_text = f"Active matter: {self.active_matter.display_name}" if self.active_matter else "No active matter"
         separator_count = len(self.bundle_items) - len(self.pdf_items)
         pdf_text = f"{len(self.pdf_items)} PDF(s)"
         if separator_count:
             pdf_text = f"{pdf_text}, {separator_count} separator(s)"
-        base = f"{matter_text} | {pdf_text}"
+        model_text = getattr(self, "_docling_model_status_text", "Docling models: checking")
+        base = f"{matter_text} | {pdf_text} | {model_text}"
         self.status.config(text=f"{base} | {message}" if message else base)
 
     def new_matter(self) -> None:
@@ -548,23 +849,39 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
 
     def parse_drop_files(self, data: str) -> list[Path]:
         raw_paths = self.tk.splitlist(data)
-        return [Path(p) for p in raw_paths if Path(p).is_file() and Path(p).suffix.lower() == ".pdf"]
+        return [Path(p) for p in raw_paths if Path(p).is_file() and is_supported_source(Path(p))]
 
     def add_paths(self, paths: list[Path]) -> None:
-        result = plan_pdf_additions(
+        result = plan_source_additions(
             self.pdf_items,
             paths,
-            detect_title=detect_authority_index_item,
+            detect_title=self._detect_source_title,
             decide_duplicate=self._decide_duplicate_pdf,
         )
-        self.bundle_items.extend(result.added)
+        service = self._source_import_service()
+        added_items = []
+        for source in result.added_sources:
+            item = service.as_pdf_item(source)
+            added_items.append(item)
+            self.source_documents[item.path] = source
+        self.bundle_items.extend(added_items)
         self.refresh_tree()
-        added = len(result.added)
+        added = len(added_items)
         duplicate_count = len(result.duplicates)
         if duplicate_count:
-            self._update_status(f"Added {added} PDF(s); reviewed {duplicate_count} duplicate(s).")
+            self._update_status(f"Added {added} source(s); reviewed {duplicate_count} duplicate(s).")
         else:
-            self._update_status(f"Added {added} PDF(s)." if added else "No new PDFs added.")
+            self._update_status(f"Added {added} source(s)." if added else "No new source documents added.")
+
+    def _detect_source_title(self, path: Path) -> str:
+        source = SourceDocument.from_path(path, display_title=clean_filename_title(path))
+        identity = source.path
+        ir = self.ir_cache.load_source_ir(DocumentIRIdentity.from_path(identity, source_type=source.source_type))
+        if ir is not None:
+            return detect_authority_index_item_from_ir(ir, fallback=lambda: source.display_title)
+        if source.source_type.value == "pdf":
+            return detect_authority_index_item(path)
+        return source.display_title
 
     def _decide_duplicate_pdf(self, duplicate: DuplicatePDF, remaining_duplicates: int) -> DuplicateDecision:
         return ask_duplicate_decision(self, duplicate, remaining_duplicates)
@@ -575,10 +892,35 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         for index, item in enumerate(self.bundle_items):
             if isinstance(item, PDFItem):
                 pdf_number += 1
-                values = (pdf_number, item.title)
+                values = (pdf_number, self._analysis_icon_for_item(item), item.title)
             else:
-                values = ("", item.title)
+                values = ("", "", item.title)
             self.tree.insert("", tk.END, iid=str(index), values=values)
+
+    def _analysis_icon_for_item(self, item: PDFItem) -> str:
+        source = self._source_for_analysis_icon(item)
+        if source is None:
+            return ANALYSIS_CACHE_MISSING_ICON
+        if getattr(self, "_analysis_in_progress_source_path", None) == source.path:
+            return ANALYSIS_IN_PROGRESS_ICON
+        cache = getattr(self, "ir_cache", None)
+        if cache is None:
+            return ANALYSIS_CACHE_MISSING_ICON
+        try:
+            identity = DocumentIRIdentity.from_path(source.path, source_type=source.source_type)
+            has_cache = cache.load_source_ir(identity) is not None
+        except Exception:
+            return ANALYSIS_CACHE_MISSING_ICON
+        return ANALYSIS_CACHE_READY_ICON if has_cache else ANALYSIS_CACHE_MISSING_ICON
+
+    def _source_for_analysis_icon(self, item: PDFItem) -> SourceDocument | None:
+        source = getattr(self, "source_documents", {}).get(item.path)
+        if source is not None:
+            return source
+        try:
+            return SourceDocument.from_path(item.path, display_title=clean_filename_title(item.path))
+        except Exception:
+            return None
 
     def selected_index(self) -> int | None:
         selection = self.tree.selection()
@@ -587,12 +929,19 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
     def on_drop(self, event) -> None:
         pdfs = self.parse_drop_files(event.data)
         if not pdfs:
-            messagebox.showwarning("No PDFs", "Please drop one or more PDF files.")
+            messagebox.showwarning("No sources", "Please drop one or more PDF, DOCX, or RTF files.")
             return
         self.after_idle(self.add_paths, pdfs)
 
     def add_pdfs_dialog(self) -> None:
-        selected = filedialog.askopenfilenames(title="Choose PDFs", filetypes=[("PDF files", "*.pdf")])
+        selected = filedialog.askopenfilenames(
+            title="Choose source documents",
+            filetypes=[
+                ("Source documents", "*.pdf *.docx *.rtf"),
+                ("PDF files", "*.pdf"),
+                ("Word/RTF files", "*.docx *.rtf"),
+            ],
+        )
         if selected:
             self.add_paths([Path(p) for p in selected])
 
@@ -614,7 +963,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self._update_status(f"Added separator: {title}")
 
     def on_tree_double_click(self, event) -> None:
-        if self.tree.identify("region", event.x, event.y) == "cell" and self.tree.identify_column(event.x) == "#2":
+        if self.tree.identify("region", event.x, event.y) == "cell" and self.tree.identify_column(event.x) == "#3":
             self.edit_selected_title()
 
     def edit_selected_title(self) -> None:
@@ -649,7 +998,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         if not isinstance(item, PDFItem):
             messagebox.showwarning("Not a PDF", "Auto-detect title is only available for PDF rows.")
             return
-        self.bundle_items[index] = replace(item, title=detect_authority_index_item(item.path))
+        self.bundle_items[index] = replace(item, title=self._detect_source_title(item.path))
         self.refresh_tree()
         self.tree.selection_set(str(index))
         self._update_status(f"Auto-detected title: {self.bundle_items[index].title}")
@@ -717,7 +1066,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             with tempfile.TemporaryDirectory() as tmp:
                 index_pdf = Path(tmp) / "matter_index.pdf"
                 converter = self._document_converter()
-                rows = get_index_rows(self.bundle_items)
+                rows = self._rows_for_output(header_title=header.strip() or "AUTHORITIES BUNDLE")
                 _used_libreoffice, links = render_matter_index_pdf_from_rows(
                     self.active_matter,
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
@@ -772,7 +1121,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             return
         output_path = Path(output_path_str)
         palette = self.flag_palette_service.list_palette()
-        rows = get_index_rows(self.bundle_items, flag_colours=palette)
+        rows = self._rows_for_output(header_title="AUTHORITIES BUNDLE", colour_page_ranges=True, flag_colours=palette)
         self._update_status("Creating counsel's bundle PDF...")
         self.update_idletasks()
         try:
@@ -880,13 +1229,13 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                 create_matter_authorities_index_docx_from_rows(
                     self.active_matter,
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
-                    get_index_rows(self.bundle_items),
+                    self._rows_for_output(header_title=header.strip() or "AUTHORITIES BUNDLE"),
                     output_path,
                     font_name=self.index_font_var.get(),
                 )
             else:
                 create_authorities_index_docx_from_rows(
-                    get_index_rows(self.bundle_items),
+                    self._rows_for_output(),
                     output_path,
                     font_name=self.index_font_var.get(),
                 )
