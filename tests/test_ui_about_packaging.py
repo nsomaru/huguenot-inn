@@ -203,6 +203,7 @@ def test_icon_generation_uses_committed_asset_and_resize_only(monkeypatch, tmp_p
     assert all(str(source) in command for command in commands)
     flattened = " ".join(part for command in commands for part in command)
     assert "-resize" in flattened
+    assert "-strip" in flattened
     assert "-fuzz" not in flattened
     assert "floodfill" not in flattened
     assert "-fill" not in flattened

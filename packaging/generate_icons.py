@@ -41,7 +41,7 @@ def generate_icons(asset_dir: Path | None = None) -> list[Path]:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False, dir=root) as handle:
                 temp_output = Path(handle.name)
             subprocess.run(  # noqa: S603 - controlled executable from PATH, fixed arguments, local build asset only.
-                [magick, str(source), "-resize", f"{size}x{size}", str(temp_output)],
+                [magick, str(source), "-resize", f"{size}x{size}", "-strip", str(temp_output)],
                 check=True,
             )
             _replace_if_changed(output, temp_output)
