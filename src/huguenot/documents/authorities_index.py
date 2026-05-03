@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,7 +13,16 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt
 
-from huguenot.domain import DocumentHeaderInput, Matter, PageRange, PartySide, PDFItem, party_label
+from huguenot.domain import (
+    BundleIndexEntry,
+    DocumentHeaderInput,
+    Matter,
+    PartySide,
+    PDFItem,
+    build_bundle_index_entries,
+    normalize_flag_colour,
+    party_label,
+)
 from huguenot.domain.legal_titles import normalize_legal_display_title
 
 DEFAULT_INDEX_FONT = "Times New Roman"
@@ -53,18 +63,18 @@ def get_pdf_page_count(path: Path) -> int:
         source.close()
 
 
-def get_index_entries(pdf_items: list[PDFItem], *, start_page: int = 1) -> list[tuple[int, PDFItem, PageRange]]:
-    entries: list[tuple[int, PDFItem, PageRange]] = []
-    current_page = start_page
-    for number, item in enumerate(pdf_items, start=1):
-        try:
-            page_count = max(1, get_pdf_page_count(item.path))
-        except Exception:
-            page_count = 1
-        page_range = PageRange(current_page, current_page + page_count - 1)
-        entries.append((number, item, page_range))
-        current_page += page_count
-    return entries
+def get_index_entries(
+    pdf_items: Sequence[PDFItem],
+    *,
+    start_page: int = 1,
+    flag_colours: Sequence[str] | None = None,
+) -> list[BundleIndexEntry]:
+    return build_bundle_index_entries(
+        pdf_items,
+        get_page_count=lambda item: get_pdf_page_count(item.path),
+        start_page=start_page,
+        flag_colours=flag_colours,
+    )
 
 
 def configure_document(doc: WordDocument, *, font_name: str = DEFAULT_INDEX_FONT) -> None:
@@ -148,8 +158,30 @@ def set_cell_borders(cell, *, bottom: bool = False) -> None:
             node.set(qn("w:val"), "nil")
 
 
+def set_cell_right_border(cell, colour_hex: str, *, size: int = 36) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = tc_pr.find(qn("w:tcBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tcBorders")
+        tc_pr.append(borders)
+    colour = normalize_flag_colour(colour_hex).lstrip("#")
+    for edge in ("end", "right"):
+        node = borders.find(qn(f"w:{edge}"))
+        if node is None:
+            node = OxmlElement(f"w:{edge}")
+            borders.append(node)
+        node.set(qn("w:val"), "single")
+        node.set(qn("w:sz"), str(size))
+        node.set(qn("w:space"), "0")
+        node.set(qn("w:color"), colour)
+
+
 def add_authorities_table(
-    doc: WordDocument, entries: list[tuple[int, PDFItem, PageRange]], *, font_name: str = DEFAULT_INDEX_FONT
+    doc: WordDocument,
+    entries: Sequence[BundleIndexEntry],
+    *,
+    font_name: str = DEFAULT_INDEX_FONT,
+    colour_page_ranges: bool = False,
 ) -> None:
     table = doc.add_table(rows=1, cols=3)
     table.style = "Table Grid"
@@ -164,7 +196,10 @@ def add_authorities_table(
     set_cell_text(header_cells[2], "Page no", bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, font_name=font_name)
     set_repeat_table_header(table.rows[0])
 
-    for number, item, page_range in entries:
+    for entry in entries:
+        number = entry.item_number
+        item = entry.item
+        page_range = entry.page_range
         row = table.add_row()
         row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
         row.height = Pt(18)
@@ -173,11 +208,18 @@ def add_authorities_table(
         set_cell_text(row_cells[1], normalize_legal_display_title(item.title), font_name=font_name)
         set_hanging_indent(row_cells[1].paragraphs[0])
         set_cell_text(row_cells[2], page_range.display(), align=WD_ALIGN_PARAGRAPH.CENTER, font_name=font_name)
+        if colour_page_ranges and entry.flag_colour:
+            set_cell_right_border(row_cells[2], entry.flag_colour)
     set_table_fixed_width(table, (0.55, 5.7, 1.25))
 
 
 def create_authorities_index_docx(
-    pdf_items: list[PDFItem], output_path: Path, *, font_name: str = DEFAULT_INDEX_FONT
+    pdf_items: list[PDFItem],
+    output_path: Path,
+    *,
+    font_name: str = DEFAULT_INDEX_FONT,
+    index_entries: Sequence[BundleIndexEntry] | None = None,
+    colour_page_ranges: bool = False,
 ) -> None:
     doc = Document()
     configure_document(doc, font_name=font_name)
@@ -190,7 +232,12 @@ def create_authorities_index_docx(
     )
     note.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph()
-    add_authorities_table(doc, get_index_entries(pdf_items), font_name=font_name)
+    add_authorities_table(
+        doc,
+        index_entries if index_entries is not None else get_index_entries(pdf_items),
+        font_name=font_name,
+        colour_page_ranges=colour_page_ranges,
+    )
     doc.save(str(output_path))
 
 
@@ -290,6 +337,8 @@ def create_matter_authorities_index_docx(
     *,
     start_page: int = 1,
     font_name: str = DEFAULT_INDEX_FONT,
+    index_entries: Sequence[BundleIndexEntry] | None = None,
+    colour_page_ranges: bool = False,
 ) -> None:
     doc = Document()
     configure_document(doc, font_name=font_name)
@@ -327,5 +376,10 @@ def create_matter_authorities_index_docx(
     heading_run.font.size = Pt(13)
     add_tramline(doc, font_name=font_name)
     doc.add_paragraph()
-    add_authorities_table(doc, get_index_entries(pdf_items, start_page=start_page), font_name=font_name)
+    add_authorities_table(
+        doc,
+        index_entries if index_entries is not None else get_index_entries(pdf_items, start_page=start_page),
+        font_name=font_name,
+        colour_page_ranges=colour_page_ranges,
+    )
     doc.save(str(output_path))

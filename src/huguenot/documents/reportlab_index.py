@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -8,7 +9,15 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-from huguenot.domain import DocumentHeaderInput, Matter, PartySide, PDFItem, party_label
+from huguenot.domain import (
+    BundleIndexEntry,
+    DocumentHeaderInput,
+    Matter,
+    PartySide,
+    PDFItem,
+    normalize_flag_colour,
+    party_label,
+)
 from huguenot.domain.legal_titles import normalize_legal_display_title
 
 from .authorities_index import get_index_entries
@@ -33,6 +42,8 @@ class ReportLabIndexRenderer:
         output_path: Path,
         *,
         start_page: int = 1,
+        index_entries: Sequence[BundleIndexEntry] | None = None,
+        colour_page_ranges: bool = False,
     ) -> list[dict[str, int | float]]:
         width, height = A4
         c = canvas.Canvas(str(output_path), pagesize=A4)
@@ -65,7 +76,11 @@ class ReportLabIndexRenderer:
 
         page_index = 0
         y = self._draw_table_header(c, y, width)
-        for number, item, page_range in get_index_entries(pdf_items, start_page=start_page):
+        entries = index_entries if index_entries is not None else get_index_entries(pdf_items, start_page=start_page)
+        for entry in entries:
+            number = entry.item_number
+            item = entry.item
+            page_range = entry.page_range
             item_title = normalize_legal_display_title(item.title)
             lines = self._wrap_text(item_title, width - 100 * mm, self.font.reportlab_regular, 10)
             row_height = max(11 * mm, (len(lines) * 4.4 + 5) * mm)
@@ -87,6 +102,8 @@ class ReportLabIndexRenderer:
             range_text = page_range.display()
             c.drawCentredString(width - 32 * mm, y - 7 * mm, range_text)
             self._draw_row_box(c, row_top, row_bottom, width)
+            if colour_page_ranges and entry.flag_colour:
+                self._draw_page_range_right_border(c, row_top, row_bottom, width, entry.flag_colour)
 
             links.append(
                 {
@@ -192,6 +209,15 @@ class ReportLabIndexRenderer:
         c.line(width - 50 * mm, row_top, width - 50 * mm, row_bottom)
         c.line(24 * mm, row_top, 24 * mm, row_bottom)
         c.line(width - 24 * mm, row_top, width - 24 * mm, row_bottom)
+
+    def _draw_page_range_right_border(
+        self, c: canvas.Canvas, row_top: float, row_bottom: float, width: float, colour_hex: str
+    ) -> None:
+        c.saveState()
+        c.setStrokeColor(colors.HexColor(normalize_flag_colour(colour_hex)))
+        c.setLineWidth(4)
+        c.line(width - 24 * mm, row_top, width - 24 * mm, row_bottom)
+        c.restoreState()
 
     def _wrap_text(self, text: str, max_width: float, font_name: str, font_size: int) -> list[str]:
         words = text.split()

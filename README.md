@@ -6,11 +6,13 @@ Huguenot Inn is a small Tkinter desktop app for creating numbered PDF bundles an
 
 - Drag and drop multiple PDFs into the bundle list.
 - Reorder, remove, clear, edit titles, and auto-detect authority/case titles.
-- Combine PDFs into one numbered bundle.
+- Combine PDFs into a **Final Court Bundle** numbered PDF.
+- Create a **Counsel's Bundle** with per-source flag colours, opaque coloured number boxes, coloured page-range markers, and physical flag-position markers.
 - Add readable page numbers with configurable position, size, and margin.
 - Create PDF bookmarks / table of contents for combined bundles.
 - Generate a standalone Word authorities index with page ranges.
 - Create and reopen persisted matters with South African court metadata.
+- Configure saved flag colours from **Tools > Flags**.
 - Generate a matter bundle with a front authorities index, or keep the editable `.docx` index and PDF bundle separate.
 - Create invisible hyperlinks from front-index rows to the correct authority pages in the combined PDF.
 - Choose the PDF index renderer from **ReportLab (default)**, **LibreOffice**, or **Microsoft Word**.
@@ -32,7 +34,8 @@ Use **File > New Matter** to create a matter, or **File > Open/Select Matter** t
 
 When no matter is active, bundle and authorities-index generation keeps the original no-matter behavior. When a matter is active:
 
-- **Create combined numbered PDF** generates a single PDF with the matter-style authorities index at the front, page-range links into the bundle, PDF outline ToC entries, and visible page numbering that starts at the first attached authority document. Matter outputs default to filenames such as `first-applicant_v_first-respondent_AUTHORITIES_BUNDLE.pdf`.
+- **Final Court Bundle** generates the existing single PDF with the matter-style authorities index at the front, page-range links into the bundle, PDF outline ToC entries, and visible page numbering that starts at the first attached authority document. Matter outputs default to filenames such as `first-applicant_v_first-respondent_AUTHORITIES_BUNDLE.pdf`.
+- **Counsel's Bundle** generates a colour-flagged bundle for physical preparation, using the saved flag palette for page-number boxes, page-range right borders, and printable flag marker positions.
 - **Create PDF bundle only** generates the numbered PDF bundle without a front index.
 - **Create authorities index (.docx)** generates the editable matter index document.
 
@@ -51,6 +54,8 @@ The **Advanced** pane controls matter-index output behavior:
   - Provides a searchable dropdown of system fonts.
   - DOCX/LibreOffice output uses the chosen family directly.
   - ReportLab maps common choices to built-in PDF fonts and falls back deterministically when needed.
+- **Disable physical flag markers**
+  - Turns off printable sticky-note marker positions for Counsel's Bundle while preserving the colour styling.
 
 ## Output formatting
 

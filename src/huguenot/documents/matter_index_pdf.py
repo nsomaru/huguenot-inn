@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import fitz
 
-from huguenot.domain import DocumentHeaderInput, Matter, PDFItem
+from huguenot.domain import BundleIndexEntry, DocumentHeaderInput, Matter, PDFItem
 
 from .authorities_index import create_matter_authorities_index_docx, get_index_entries
 from .converter import DocxToPdfConverter, LibreOfficeConverter
@@ -26,6 +26,8 @@ def render_matter_index_pdf(
     converter: DocxToPdfConverter | None = None,
     renderer_preference: RendererPreference | None = None,
     font_name: str | None = None,
+    index_entries: Sequence[BundleIndexEntry] | None = None,
+    colour_page_ranges: bool = False,
 ) -> tuple[bool, list[dict[str, int | float]]]:
     converter = converter or LibreOfficeConverter()
     renderer_preference = renderer_preference or RendererPreference()
@@ -49,6 +51,8 @@ def render_matter_index_pdf(
                     converter,
                     start_page=start_page,
                     font_name=font.family,
+                    index_entries=index_entries,
+                    colour_page_ranges=colour_page_ranges,
                 ),
             )
             return True, links
@@ -67,6 +71,8 @@ def render_matter_index_pdf(
             pdf_items,
             path,
             start_page=start_page,
+            index_entries=index_entries,
+            colour_page_ranges=colour_page_ranges,
         ),
     )
     return False, links
@@ -92,6 +98,8 @@ def _render_with_libreoffice(
     *,
     start_page: int,
     font_name: str,
+    index_entries: Sequence[BundleIndexEntry] | None,
+    colour_page_ranges: bool,
 ) -> list[dict[str, int | float]]:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -103,23 +111,28 @@ def _render_with_libreoffice(
             docx_path,
             start_page=start_page,
             font_name=font_name,
+            index_entries=index_entries,
+            colour_page_ranges=colour_page_ranges,
         )
         converted_pdf = converter.convert_docx_to_pdf(docx_path, tmp_path)
         output_path.write_bytes(converted_pdf.read_bytes())
 
-    return _find_page_range_links(output_path, pdf_items, start_page=start_page)
+    entries = index_entries if index_entries is not None else get_index_entries(pdf_items, start_page=start_page)
+    return _find_page_range_links(output_path, entries, start_page=start_page)
 
 
 def _find_page_range_links(
     index_pdf_path: Path,
-    pdf_items: list[PDFItem],
+    index_entries: Sequence[BundleIndexEntry],
     *,
     start_page: int,
 ) -> list[dict[str, int | float]]:
     doc = fitz.open(index_pdf_path)
     links: list[dict[str, int | float]] = []
     try:
-        for _number, item, page_range in get_index_entries(pdf_items, start_page=start_page):
+        for entry in index_entries:
+            item = entry.item
+            page_range = entry.page_range
             texts = (item.title, page_range.display())
             found = False
             for page_index in range(doc.page_count):

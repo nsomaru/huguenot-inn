@@ -5,12 +5,12 @@ import tkinter as tk
 import traceback
 from dataclasses import replace
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 from typing import Any, cast
 
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
-from huguenot.application import DuplicateDecision, DuplicatePDF, MatterService, plan_pdf_additions
+from huguenot.application import DuplicateDecision, DuplicatePDF, FlagPaletteService, MatterService, plan_pdf_additions
 from huguenot.documents import (
     Docx2PdfConverter,
     LibreOfficeConverter,
@@ -18,6 +18,7 @@ from huguenot.documents import (
     RendererPreference,
     create_authorities_index_docx,
     create_matter_authorities_index_docx,
+    get_index_entries,
     list_system_fonts,
     render_matter_index_pdf,
 )
@@ -32,8 +33,19 @@ from huguenot.domain import (
     matter_output_filename,
     matter_output_root,
 )
-from huguenot.pdf import POSITIONS, combine_number_and_add_toc, combine_with_front_index, detect_authority_index_item
-from huguenot.persistence import SQLiteCourtRepository, SQLiteMatterRepository, create_app_database
+from huguenot.pdf import (
+    POSITIONS,
+    PdfBundleRenderOptions,
+    combine_number_and_add_toc,
+    combine_with_front_index,
+    detect_authority_index_item,
+)
+from huguenot.persistence import (
+    SQLiteCourtRepository,
+    SQLiteFlagPaletteRepository,
+    SQLiteMatterRepository,
+    create_app_database,
+)
 from huguenot.ui import duplicate_dialog
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path, app_icon_path
 from huguenot.ui.duplicate_dialog import ask_duplicate_decision
@@ -198,6 +210,97 @@ class OpenMatterDialog(tk.Toplevel):
         self.destroy()
 
 
+class FlagPaletteDialog(tk.Toplevel):
+    def __init__(self, parent: tk.Misc, service: FlagPaletteService) -> None:
+        super().__init__(parent)
+        self.service = service
+        self.title("Flags")
+        self.transient(cast(Any, parent))
+        self.grab_set()
+        self.colours = self.service.list_palette()
+
+        outer = ttk.Frame(self, padding=14)
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="Counsel's Bundle flag colours").pack(anchor="w")
+        self.listbox = tk.Listbox(outer, width=24, height=10)
+        self.listbox.pack(fill="both", expand=True, pady=(8, 8))
+        self._refresh()
+
+        actions = ttk.Frame(outer)
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Add", command=self._add).pack(side="left")
+        ttk.Button(actions, text="Edit", command=self._edit).pack(side="left", padx=(6, 0))
+        ttk.Button(actions, text="Delete", command=self._delete).pack(side="left", padx=(6, 0))
+        ttk.Button(actions, text="Up", command=self._move_up).pack(side="left", padx=(18, 0))
+        ttk.Button(actions, text="Down", command=self._move_down).pack(side="left", padx=(6, 0))
+        ttk.Button(actions, text="Save", command=self._save).pack(side="right", padx=(6, 0))
+        ttk.Button(actions, text="Cancel", command=self.destroy).pack(side="right")
+
+    def _refresh(self) -> None:
+        self.listbox.delete(0, tk.END)
+        for colour in self.colours:
+            self.listbox.insert(tk.END, colour)
+
+    def _selected_index(self) -> int | None:
+        selection = self.listbox.curselection()
+        return None if not selection else int(selection[0])
+
+    def _choose_colour(self, initial: str | None = None) -> str | None:
+        _rgb, colour = colorchooser.askcolor(color=initial, parent=self, title="Choose flag colour")
+        return None if colour is None else colour
+
+    def _add(self) -> None:
+        colour = self._choose_colour()
+        if colour:
+            self.colours.append(colour)
+            self._refresh()
+            self.listbox.selection_set(tk.END)
+
+    def _edit(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            return
+        colour = self._choose_colour(self.colours[index])
+        if colour:
+            self.colours[index] = colour
+            self._refresh()
+            self.listbox.selection_set(index)
+
+    def _delete(self) -> None:
+        index = self._selected_index()
+        if index is None:
+            return
+        if len(self.colours) == 1:
+            messagebox.showwarning("Flags", "At least one flag colour is required.", parent=self)
+            return
+        del self.colours[index]
+        self._refresh()
+
+    def _move_up(self) -> None:
+        index = self._selected_index()
+        if index is None or index == 0:
+            return
+        self.colours[index - 1], self.colours[index] = self.colours[index], self.colours[index - 1]
+        self._refresh()
+        self.listbox.selection_set(index - 1)
+
+    def _move_down(self) -> None:
+        index = self._selected_index()
+        if index is None or index >= len(self.colours) - 1:
+            return
+        self.colours[index + 1], self.colours[index] = self.colours[index], self.colours[index + 1]
+        self._refresh()
+        self.listbox.selection_set(index + 1)
+
+    def _save(self) -> None:
+        try:
+            self.colours = self.service.replace_palette(self.colours)
+        except ValueError as exc:
+            messagebox.showerror("Invalid flags", str(exc), parent=self)
+            return
+        self.destroy()
+
+
 class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
     def __init__(self) -> None:
         super().__init__(**root_identity_options(APP_WINDOW_TITLE))
@@ -209,7 +312,9 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         database = create_app_database()
         court_repository = SQLiteCourtRepository(database)
         matter_repository = SQLiteMatterRepository(database)
+        flag_palette_repository = SQLiteFlagPaletteRepository(database)
         self.matter_service = MatterService(matter_repository, court_repository)
+        self.flag_palette_service = FlagPaletteService(flag_palette_repository)
         self.active_matter = self.matter_service.get_last_active_matter()
 
         self.pdf_items: list[PDFItem] = []
@@ -218,6 +323,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self.margin_var = tk.IntVar(value=DEFAULT_NUMBER_MARGIN)
         self.renderer_var = tk.StringVar(value=REPORTLAB_RENDERER_LABEL)
         self.index_font_var = tk.StringVar(value="Times New Roman")
+        self.disable_physical_flag_markers_var = tk.BooleanVar(value=False)
         self._system_fonts = list_system_fonts()
         self._icon_image: tk.PhotoImage | None = None
         self._about_icon_image: tk.PhotoImage | None = None
@@ -265,6 +371,11 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         font_box = ttk.Combobox(advanced, textvariable=self.index_font_var, values=self._system_fonts, width=30)
         font_box.grid(row=0, column=3, sticky="ew", padx=(8, 0))
         font_box.bind("<KeyRelease>", self._filter_font_choices)
+        ttk.Checkbutton(
+            advanced,
+            text="Disable physical flag markers",
+            variable=self.disable_physical_flag_markers_var,
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(8, 0))
         advanced.columnconfigure(3, weight=1)
         controls.columnconfigure(5, weight=1)
 
@@ -299,9 +410,8 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         ttk.Button(buttons, text="Move down", command=self.move_down).pack(fill="x", pady=(0, 6))
         ttk.Button(buttons, text="Remove", command=self.remove_selected).pack(fill="x", pady=(0, 6))
         ttk.Button(buttons, text="Clear", command=self.clear_list).pack(fill="x", pady=(0, 18))
-        ttk.Button(buttons, text="Create combined numbered PDF", command=self.create_combined_pdf).pack(
-            fill="x", pady=(0, 6)
-        )
+        ttk.Button(buttons, text="Final Court Bundle", command=self.create_combined_pdf).pack(fill="x", pady=(0, 6))
+        ttk.Button(buttons, text="Counsel's Bundle", command=self.create_counsels_bundle).pack(fill="x", pady=(0, 6))
         ttk.Button(buttons, text="Create PDF bundle only", command=self.create_pdf_bundle_only).pack(
             fill="x", pady=(0, 6)
         )
@@ -321,6 +431,9 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.destroy)
         menu.add_cascade(label="File", menu=file_menu)
+        tools_menu = tk.Menu(menu, tearoff=False)
+        tools_menu.add_command(label="Flags", command=self.open_flags_dialog)
+        menu.add_cascade(label="Tools", menu=tools_menu)
         help_menu = tk.Menu(menu, tearoff=False)
         help_menu.add_command(label="About Huguenot Inn", command=self.show_about)
         menu.add_cascade(label="Help", menu=help_menu)
@@ -380,6 +493,10 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         )
         ttk.Label(outer, text=text, justify="left").grid(row=0, column=1, sticky="w")
         ttk.Button(outer, text="OK", command=dialog.destroy).grid(row=1, column=1, sticky="e", pady=(12, 0))
+
+    def open_flags_dialog(self) -> None:
+        dialog = FlagPaletteDialog(self, self.flag_palette_service)
+        self.wait_window(dialog)
 
     def _update_status(self, message: str | None = None) -> None:
         matter_text = f"Active matter: {self.active_matter.display_name}" if self.active_matter else "No active matter"
@@ -553,7 +670,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             with tempfile.TemporaryDirectory() as tmp:
                 index_pdf = Path(tmp) / "matter_index.pdf"
                 converter = self._document_converter()
-                used_libreoffice, links = render_matter_index_pdf(
+                _used_libreoffice, links = render_matter_index_pdf(
                     self.active_matter,
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
                     self.pdf_items,
@@ -580,7 +697,70 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self._update_status(f"Created: {output_path}")
         messagebox.showinfo("Complete", f"Created: {output_path}")
 
-    def _create_plain_pdf_bundle(self, *, initialfile: str) -> None:
+    def create_counsels_bundle(self) -> None:
+        if not self.active_matter:
+            self._create_plain_pdf_bundle(initialfile="counsels_bundle.pdf", counsel_bundle=True)
+            return
+        if not self.pdf_items:
+            messagebox.showwarning("No PDFs", "Please add one or more PDFs first.")
+            return
+        output_path_str = filedialog.asksaveasfilename(
+            title="Save counsel's bundle PDF as",
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf")],
+            initialfile=matter_output_filename(self.active_matter, "COUNSELS_BUNDLE", ".pdf"),
+        )
+        if not output_path_str:
+            return
+        header = simpledialog.askstring(
+            title="Document header",
+            prompt="Document header:",
+            initialvalue="AUTHORITIES BUNDLE",
+            parent=self,
+        )
+        if header is None:
+            return
+        output_path = Path(output_path_str)
+        palette = self.flag_palette_service.list_palette()
+        entries = get_index_entries(self.pdf_items, flag_colours=palette)
+        self._update_status("Creating counsel's bundle PDF...")
+        self.update_idletasks()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                index_pdf = Path(tmp) / "matter_index.pdf"
+                converter = self._document_converter()
+                _used_libreoffice, links = render_matter_index_pdf(
+                    self.active_matter,
+                    DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
+                    self.pdf_items,
+                    index_pdf,
+                    converter=converter,
+                    renderer_preference=self._renderer_preference(),
+                    font_name=self.index_font_var.get(),
+                    index_entries=entries,
+                    colour_page_ranges=True,
+                )
+                combine_with_front_index(
+                    self.pdf_items,
+                    index_pdf,
+                    links,
+                    output_path,
+                    self.position_var.get(),
+                    int(self.font_size_var.get()),
+                    int(self.margin_var.get()),
+                    toc_root_title=matter_output_root(self.active_matter),
+                    render_options=self._counsel_pdf_render_options(palette),
+                    index_entries=entries,
+                )
+        except Exception as exc:
+            traceback.print_exc()
+            messagebox.showerror("Failed", f"Could not create counsel's bundle PDF: {exc}")
+            self._update_status("Failed to create counsel's bundle PDF.")
+            return
+        self._update_status(f"Created: {output_path}")
+        messagebox.showinfo("Complete", f"Created: {output_path}")
+
+    def _create_plain_pdf_bundle(self, *, initialfile: str, counsel_bundle: bool = False) -> None:
         if not self.pdf_items:
             messagebox.showwarning("No PDFs", "Please add one or more PDFs first.")
             return
@@ -594,12 +774,14 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             return
         output_path = Path(output_path_str)
         try:
+            palette = self.flag_palette_service.list_palette() if counsel_bundle else None
             combine_number_and_add_toc(
                 self.pdf_items,
                 output_path,
                 self.position_var.get(),
                 int(self.font_size_var.get()),
                 int(self.margin_var.get()),
+                render_options=self._counsel_pdf_render_options(palette) if palette else None,
             )
         except Exception as exc:
             traceback.print_exc()
@@ -608,6 +790,13 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             return
         self._update_status(f"Created: {output_path}")
         messagebox.showinfo("Complete", f"Created: {output_path}")
+
+    def _counsel_pdf_render_options(self, palette: list[str]) -> PdfBundleRenderOptions:
+        return PdfBundleRenderOptions(
+            flag_colours=palette,
+            physical_flag_markers=not bool(self.disable_physical_flag_markers_var.get()),
+            number_fill_opacity=1.0,
+        )
 
     def create_authorities_index(self) -> None:
         if not self.pdf_items:

@@ -31,6 +31,39 @@ def test_plain_authorities_index_uses_page_ranges(tmp_path: Path) -> None:
     assert doc.tables[0].cell(1, 2).text == "1-2"
 
 
+def test_authorities_index_can_colour_page_range_cell_right_border_for_counsel_bundle(tmp_path: Path) -> None:
+    pdf = tmp_path / "authority.pdf"
+    make_pdf(pdf, "Authority", pages=1)
+    output = tmp_path / "index.docx"
+
+    create_authorities_index_docx(
+        [PDFItem(pdf, "Authority title")],
+        output,
+        index_entries=None,
+        colour_page_ranges=True,
+    )
+
+    with ZipFile(output) as archive:
+        xml = archive.read("word/document.xml").decode()
+    assert 'w:fill="3467A5"' not in xml
+    assert 'w:right w:val="single" w:sz="36" w:space="0" w:color="3467A5"' not in xml
+
+    from huguenot.documents import get_index_entries
+
+    entries = get_index_entries([PDFItem(pdf, "Authority title")], flag_colours=["#3467A5"])
+    create_authorities_index_docx(
+        [PDFItem(pdf, "Authority title")],
+        output,
+        index_entries=entries,
+        colour_page_ranges=True,
+    )
+
+    with ZipFile(output) as archive:
+        xml = archive.read("word/document.xml").decode()
+    assert 'w:fill="3467A5"' not in xml
+    assert 'w:right w:val="single" w:sz="36" w:space="0" w:color="3467A5"' in xml
+
+
 def test_plain_authorities_index_normalizes_afrikaans_authority_titles(tmp_path: Path) -> None:
     pdf = tmp_path / "authority.pdf"
     make_pdf(pdf, "Authority", pages=1)

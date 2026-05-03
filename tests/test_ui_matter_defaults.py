@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 from huguenot.domain import Court, Matter, Party, PartySide, PDFItem, ProceedingType
@@ -78,3 +79,46 @@ def test_page_number_ui_defaults_use_shared_values(monkeypatch) -> None:
     assert captured == [DEFAULT_NUMBER_POSITION, DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN]
     assert ui_app.DEFAULT_NUMBER_FONT_SIZE == DEFAULT_NUMBER_FONT_SIZE
     assert ui_app.DEFAULT_NUMBER_MARGIN == DEFAULT_NUMBER_MARGIN
+
+
+def test_output_labels_and_flags_menu_are_wired() -> None:
+    ui_source = inspect.getsource(ui_app.PDFCombinerNumbererTOCIndexApp._build_ui)
+    menu_source = inspect.getsource(ui_app.PDFCombinerNumbererTOCIndexApp._build_menu)
+
+    assert "Final Court Bundle" in ui_source
+    assert "Counsel's Bundle" in ui_source
+    assert "Create PDF bundle only" in ui_source
+    assert "Flags" in menu_source
+    assert "Tools" in menu_source
+    assert "Disable physical flag markers" in ui_source
+
+
+def test_counsels_bundle_no_matter_uses_plain_bundle_with_counsel_options(monkeypatch) -> None:
+    app = ui_app.PDFCombinerNumbererTOCIndexApp.__new__(ui_app.PDFCombinerNumbererTOCIndexApp)
+    app.active_matter = None
+    captured = {}
+
+    def fake_plain_bundle(**kwargs):
+        captured.update(kwargs)
+
+    app._create_plain_pdf_bundle = fake_plain_bundle  # type: ignore[method-assign]
+
+    app.create_counsels_bundle()
+
+    assert captured == {"initialfile": "counsels_bundle.pdf", "counsel_bundle": True}
+
+
+def test_counsel_render_options_disable_only_physical_markers() -> None:
+    app = ui_app.PDFCombinerNumbererTOCIndexApp.__new__(ui_app.PDFCombinerNumbererTOCIndexApp)
+
+    class FakeBooleanVar:
+        def get(self) -> bool:
+            return True
+
+    app.disable_physical_flag_markers_var = FakeBooleanVar()  # type: ignore[assignment]
+
+    options = app._counsel_pdf_render_options(["#3467A5"])
+
+    assert options.flag_colours == ["#3467A5"]
+    assert options.physical_flag_markers is False
+    assert options.number_fill_opacity == 1.0

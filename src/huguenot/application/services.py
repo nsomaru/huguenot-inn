@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from huguenot.domain import Court, Matter, Party, PartySide, ProceedingType, validate_matter
+from huguenot.domain import Court, Matter, Party, PartySide, ProceedingType, normalize_flag_palette, validate_matter
 
-from .protocols import CourtRepository, MatterRepository
+from .protocols import CourtRepository, FlagPaletteRepository, MatterRepository
 
 
 class MatterService:
@@ -70,3 +70,16 @@ class MatterService:
 
     def get_last_active_matter(self) -> Matter | None:
         return self._matter_repository.get_last_active()
+
+
+class FlagPaletteService:
+    def __init__(self, flag_palette_repository: FlagPaletteRepository) -> None:
+        self._flag_palette_repository = flag_palette_repository
+
+    def list_palette(self) -> list[str]:
+        return self._flag_palette_repository.list_palette()
+
+    def replace_palette(self, colours: list[str]) -> list[str]:
+        normalized = normalize_flag_palette(colours)
+        self._flag_palette_repository.replace_palette(normalized)
+        return normalized

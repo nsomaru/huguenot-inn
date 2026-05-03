@@ -4,6 +4,26 @@ All notable changes to **Huguenot Inn** are documented here.
 
 ## [Unreleased]
 
+## [0.4.5a] - 2026-05-03
+
+### Added
+
+- Added **Counsel's Bundle** output with configurable per-source flag colours, persisted via **Tools > Flags**.
+- Added physical flag markers for Counsel's Bundle PDFs, with an Advanced option to disable the markers while keeping colour styling.
+
+### Changed
+
+- Renamed the existing combined numbered PDF action to **Final Court Bundle** without changing its output.
+- Counsel's Bundle page numbers now use opaque coloured number boxes, and DOCX/ReportLab page-range cells use thick coloured right borders instead of filled backgrounds.
+
+### Tests
+
+- Added coverage for flag palette persistence, Counsel's Bundle PDF styling, DOCX and ReportLab index flag borders, migration packaging, and UI wiring.
+
+### Verification
+
+- Verified with Ruff formatting, Ruff lint, Pyright, Pytest, and Bandit.
+
 ## [0.4.2.4a] - 2026-05-02
 
 ### Added

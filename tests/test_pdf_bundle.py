@@ -7,7 +7,7 @@ import fitz
 from huguenot.application import protocols
 from huguenot.domain import PDFItem
 from huguenot.domain.page_numbering import DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN, DEFAULT_NUMBER_POSITION
-from huguenot.pdf import combine_number_and_add_toc, combine_with_front_index
+from huguenot.pdf import PdfBundleRenderOptions, combine_number_and_add_toc, combine_with_front_index
 from huguenot.pdf.bundle import draw_page_number, get_number_box, number_box_size
 
 
@@ -177,3 +177,92 @@ def test_draw_page_number_uses_transparent_rectangle_background(tmp_path: Path) 
         doc.save(output)
     finally:
         doc.close()
+
+
+def test_draw_page_number_can_use_translucent_flag_colour(tmp_path: Path) -> None:
+    output = tmp_path / "numbered.pdf"
+    doc = fitz.open()
+    try:
+        page = doc.new_page()
+        draw_page_number(
+            page,
+            1,
+            DEFAULT_NUMBER_POSITION,
+            DEFAULT_NUMBER_FONT_SIZE,
+            DEFAULT_NUMBER_MARGIN,
+            fill_colour="#3467A5",
+            fill_opacity=0.25,
+        )
+        drawings: list[dict[str, Any]] = page.get_drawings()
+        filled = [drawing for drawing in drawings if drawing.get("fill") is not None]
+        assert filled
+        assert any(abs(float(drawing.get("fill_opacity", 0)) - 0.25) < 0.01 for drawing in filled)
+        doc.save(output)
+    finally:
+        doc.close()
+
+
+def test_counsel_no_matter_bundle_colours_number_boxes_and_markers(tmp_path: Path) -> None:
+    first = tmp_path / "first.pdf"
+    second = tmp_path / "second.pdf"
+    make_pdf(first, "First", pages=2)
+    make_pdf(second, "Second", pages=1)
+    output = tmp_path / "counsel.pdf"
+
+    combine_number_and_add_toc(
+        [PDFItem(first, "First authority"), PDFItem(second, "Second authority")],
+        output,
+        render_options=PdfBundleRenderOptions(flag_colours=["#3467A5", "#71B735"], physical_flag_markers=True),
+    )
+
+    doc = fitz.open(output)
+    try:
+        assert doc.page_count == 3
+        page0_fills = [drawing for drawing in doc[0].get_drawings() if drawing.get("fill") is not None]
+        page1_fills = [drawing for drawing in doc[1].get_drawings() if drawing.get("fill") is not None]
+        page2_fills = [drawing for drawing in doc[2].get_drawings() if drawing.get("fill") is not None]
+        assert len(page0_fills) > len(page1_fills)
+        assert len(page2_fills) > len(page1_fills)
+        assert page1_fills
+        assert all(abs(float(drawing.get("fill_opacity", 0)) - 1) < 0.01 for drawing in page1_fills)
+    finally:
+        doc.close()
+
+
+def test_counsel_front_index_markers_skip_index_pages_and_can_be_disabled(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    index = tmp_path / "index.pdf"
+    output = tmp_path / "combined.pdf"
+    disabled_output = tmp_path / "disabled.pdf"
+    make_pdf(source, "Authority", pages=1)
+    make_pdf(index, "Index", pages=2)
+
+    combine_with_front_index(
+        [PDFItem(source, "Authority")],
+        index,
+        [],
+        output,
+        render_options=PdfBundleRenderOptions(flag_colours=["#3467A5"], physical_flag_markers=True),
+    )
+    combine_with_front_index(
+        [PDFItem(source, "Authority")],
+        index,
+        [],
+        disabled_output,
+        render_options=PdfBundleRenderOptions(flag_colours=["#3467A5"], physical_flag_markers=False),
+    )
+
+    doc = fitz.open(output)
+    disabled_doc = fitz.open(disabled_output)
+    try:
+        assert all(
+            not [drawing for drawing in doc[index_page].get_drawings() if drawing.get("fill") is not None]
+            for index_page in (0, 1)
+        )
+        enabled_item_fills = [drawing for drawing in doc[2].get_drawings() if drawing.get("fill") is not None]
+        disabled_item_fills = [drawing for drawing in disabled_doc[2].get_drawings() if drawing.get("fill") is not None]
+        assert len(enabled_item_fills) == len(disabled_item_fills) + 1
+        assert disabled_item_fills
+    finally:
+        doc.close()
+        disabled_doc.close()

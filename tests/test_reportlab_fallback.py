@@ -17,6 +17,14 @@ def make_pdf(path: Path, text: str) -> None:
         doc.close()
 
 
+def _rgb_close(actual: object, expected: tuple[float, float, float]) -> bool:
+    return (
+        isinstance(actual, tuple)
+        and len(actual) == 3
+        and all(abs(float(actual[index]) - expected[index]) < 0.01 for index in range(3))
+    )
+
+
 def test_reportlab_fallback_renders_pdf_and_link_rects(tmp_path: Path) -> None:
     source = tmp_path / "authority.pdf"
     make_pdf(source, "Authority")
@@ -48,6 +56,47 @@ def test_reportlab_fallback_renders_pdf_and_link_rects(tmp_path: Path) -> None:
     finally:
         doc.close()
     assert links and links[0]["target_page"] == 0
+
+
+def test_reportlab_fallback_can_colour_page_range_cell_right_border(tmp_path: Path) -> None:
+    source = tmp_path / "authority.pdf"
+    make_pdf(source, "Authority")
+    output = tmp_path / "index.pdf"
+    matter = Matter(
+        court=Court("IN THE HIGH COURT OF SOUTH AFRICA", "(GAUTENG DIVISION, JOHANNESBURG)"),
+        proceeding_type=ProceedingType.APPLICATION,
+        case_number="2026-086328",
+        parties=(
+            Party("Axim (Pty) Ltd", PartySide.BRINGING, 1),
+            Party("Moodie", PartySide.OPPOSING, 1),
+        ),
+    )
+
+    from huguenot.documents import get_index_entries
+
+    entries = get_index_entries([PDFItem(source, "Authority title")], flag_colours=["#3467A5"])
+    ReportLabIndexRenderer().render_pdf(
+        matter,
+        DocumentHeaderInput("Respondents' Authorities Bundle"),
+        [PDFItem(source, "Authority title")],
+        output,
+        index_entries=entries,
+        colour_page_ranges=True,
+    )
+
+    doc = fitz.open(output)
+    try:
+        drawings = doc[0].get_drawings()
+        flag_rgb = (0x34 / 255, 0x67 / 255, 0xA5 / 255)
+        assert not any(_rgb_close(drawing.get("fill"), flag_rgb) for drawing in drawings)
+        coloured_strokes = [
+            drawing
+            for drawing in drawings
+            if _rgb_close(drawing.get("color"), flag_rgb) and abs(float(drawing.get("width", 0)) - 4) < 0.01
+        ]
+        assert coloured_strokes
+    finally:
+        doc.close()
 
 
 def test_reportlab_fallback_normalizes_afrikaans_authority_titles(tmp_path: Path) -> None:

@@ -29,6 +29,11 @@ class CourtRepository(Protocol):
     def add_header_line(self, line: str) -> str: ...
 
 
+class FlagPaletteRepository(Protocol):
+    def list_palette(self) -> list[str]: ...
+    def replace_palette(self, colours: list[str]) -> None: ...
+
+
 class IndexRenderer(Protocol):
     def render_docx(
         self,

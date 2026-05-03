@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from huguenot.domain import Court, Matter, Party, PartySide, ProceedingType
+from huguenot.domain import Court, Matter, Party, PartySide, ProceedingType, normalize_flag_palette
 
 from .database import AppDatabase
 
@@ -196,6 +196,34 @@ class SQLiteMatterRepository:
         except (TypeError, ValueError):
             return None
         return self.get(matter_id)
+
+
+class SQLiteFlagPaletteRepository:
+    def __init__(self, database: AppDatabase) -> None:
+        self._database = database
+
+    def list_palette(self) -> list[str]:
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT colour_hex
+                FROM flag_palette_colours
+                ORDER BY display_order ASC, id ASC
+                """
+            ).fetchall()
+        return [row["colour_hex"] for row in rows]
+
+    def replace_palette(self, colours: list[str]) -> None:
+        normalized = normalize_flag_palette(colours)
+        with self._database.connect() as connection:
+            connection.execute("DELETE FROM flag_palette_colours")
+            connection.executemany(
+                """
+                INSERT INTO flag_palette_colours(display_order, colour_hex)
+                VALUES (?, ?)
+                """,
+                [(index, colour) for index, colour in enumerate(normalized, start=1)],
+            )
 
 
 def _ensure_header(connection: sqlite3.Connection, line: str | None) -> int | None:
