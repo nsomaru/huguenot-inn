@@ -251,7 +251,8 @@ def test_macos_icon_generation_compares_outputs_before_replacing() -> None:
 
     assert "replace_if_changed" in script
     assert "cmp -s" in script
-    assert 'TMP_ICON_ICNS="${ICON_ICNS}.tmp"' in script
+    assert 'tmp_icon="$ICONSET/${filename%.png}.tmp.png"' in script
+    assert 'TMP_ICON_ICNS="${ICON_ICNS%.icns}.tmp.icns"' in script
 
 
 def test_packaging_static_audit_has_no_local_network_permission_triggers() -> None:

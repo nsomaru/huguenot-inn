@@ -69,11 +69,11 @@ ICON_SIZES=(
 )
 for icon_size in "${ICON_SIZES[@]}"; do
   read -r height width filename <<<"$icon_size"
-  tmp_icon="$ICONSET/${filename}.tmp"
+  tmp_icon="$ICONSET/${filename%.png}.tmp.png"
   sips -z "$height" "$width" "$ICON_PNG" --out "$tmp_icon" >/dev/null
   replace_if_changed "$tmp_icon" "$ICONSET/$filename"
 done
-TMP_ICON_ICNS="${ICON_ICNS}.tmp"
+TMP_ICON_ICNS="${ICON_ICNS%.icns}.tmp.icns"
 iconutil -c icns "$ICONSET" -o "$TMP_ICON_ICNS"
 replace_if_changed "$TMP_ICON_ICNS" "$ICON_ICNS"
 
