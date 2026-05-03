@@ -5,7 +5,7 @@ Huguenot Inn is a small Tkinter desktop app for creating numbered PDF bundles an
 ## Features
 
 - Drag and drop multiple PDFs into the bundle list.
-- Reorder, remove, clear, edit titles, and auto-detect authority/case titles.
+- Reorder, remove, clear, edit titles, and auto-detect title-cased South African authority/case citations, including common Afrikaans particles.
 - Combine PDFs into a **Final Court Bundle** numbered PDF.
 - Create a **Counsel's Bundle** with per-source flag colours, opaque coloured number boxes, coloured page-range markers, and physical flag-position markers.
 - Add readable page numbers with configurable position, size, and margin.

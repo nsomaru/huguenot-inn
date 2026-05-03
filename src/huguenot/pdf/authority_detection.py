@@ -174,6 +174,7 @@ LOWERCASE_WORDS = {
     "at",
     "to",
     "by",
+    "en",
     "from",
     "with",
 }
@@ -193,8 +194,14 @@ def smart_title_word(word: str, *, is_first_word: bool = False) -> str:
     if INITIALS_RE.match(word):
         return word.upper()
 
+    if key in {"'n", "’n"}:
+        return f"{word[0]}n"
+
     if key in LOWERCASE_WORDS and not is_first_word:
         return key
+
+    if key in LOWERCASE_WORDS:
+        return key[:1].upper() + key[1:]
 
     if "-" in word:
         return "-".join(
@@ -256,7 +263,7 @@ def titlecase_parties_before_year(citation: str) -> str:
     rest = citation[match.start() :].strip()
     if not parties:
         return citation
-    return f"{normalize_legal_display_title(parties)} {rest}".strip()
+    return f"{smart_title_party_text(parties)} {rest}".strip()
 
 
 def strip_juta_source_noise(text: str) -> str:

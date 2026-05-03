@@ -4,6 +4,24 @@ All notable changes to **Huguenot Inn** are documented here.
 
 ## [Unreleased]
 
+## [0.4.6a] - 2026-05-03
+
+### Changed
+
+- Refreshed packaged application icon PNG assets.
+
+### Fixed
+
+- Restored pre-regression title casing for detected case citations in `examples/cases`, with targeted Afrikaans `en` and `'n` handling.
+
+### Tests
+
+- Added regression coverage for example-case citation detection and mixed-case legal citation title casing.
+
+### Verification
+
+- Verified with Ruff formatting, Ruff lint, Pyright, Pytest, and Bandit.
+
 ## [0.4.5a] - 2026-05-03
 
 ### Added
