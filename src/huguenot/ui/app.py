@@ -16,28 +16,31 @@ from huguenot.documents import (
     LibreOfficeConverter,
     PDFRenderer,
     RendererPreference,
-    create_authorities_index_docx,
-    create_matter_authorities_index_docx,
-    get_index_entries,
+    create_authorities_index_docx_from_rows,
+    create_matter_authorities_index_docx_from_rows,
+    get_index_rows,
     list_system_fonts,
-    render_matter_index_pdf,
+    render_matter_index_pdf_from_rows,
 )
 from huguenot.domain import (
     DEFAULT_NUMBER_FONT_SIZE,
     DEFAULT_NUMBER_MARGIN,
     DEFAULT_NUMBER_POSITION,
+    BundleListItem,
     DocumentHeaderInput,
+    IndexSeparator,
     Matter,
     PDFItem,
     ProceedingType,
     matter_output_filename,
     matter_output_root,
+    pdf_items_from_bundle_items,
 )
 from huguenot.pdf import (
     POSITIONS,
     PdfBundleRenderOptions,
-    combine_number_and_add_toc,
-    combine_with_front_index,
+    combine_bundle_items_number_and_add_toc,
+    combine_bundle_items_with_front_index,
     detect_authority_index_item,
 )
 from huguenot.persistence import (
@@ -49,7 +52,7 @@ from huguenot.persistence import (
 from huguenot.ui import duplicate_dialog
 from huguenot.ui.about import ABOUT_METADATA, about_icon_path, app_icon_path
 from huguenot.ui.duplicate_dialog import ask_duplicate_decision
-from huguenot.ui.platform import configure_app_identity, root_identity_options
+from huguenot.ui.platform import configure_app_identity, configure_macos_quit, root_identity_options
 
 APP_WINDOW_TITLE = "Huguenot Inn"
 REPORTLAB_RENDERER_LABEL = "ReportLab (default)"
@@ -317,7 +320,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self.flag_palette_service = FlagPaletteService(flag_palette_repository)
         self.active_matter = self.matter_service.get_last_active_matter()
 
-        self.pdf_items: list[PDFItem] = []
+        self.bundle_items: list[BundleListItem] = []
         self.position_var = tk.StringVar(value=DEFAULT_NUMBER_POSITION)
         self.font_size_var = tk.IntVar(value=DEFAULT_NUMBER_FONT_SIZE)
         self.margin_var = tk.IntVar(value=DEFAULT_NUMBER_MARGIN)
@@ -328,8 +331,18 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         self._icon_image: tk.PhotoImage | None = None
         self._about_icon_image: tk.PhotoImage | None = None
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._close_application)
+        configure_macos_quit(self, self._close_application)
         self._configure_app_icon()
         self._update_status()
+
+    @property
+    def pdf_items(self) -> list[PDFItem]:
+        return pdf_items_from_bundle_items(self.bundle_items)
+
+    @pdf_items.setter
+    def pdf_items(self, value: list[PDFItem]) -> None:
+        self.bundle_items = list(value)
 
     def _build_ui(self) -> None:
         self._build_menu()
@@ -402,6 +415,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         buttons = ttk.Frame(main)
         buttons.pack(side="right", fill="y", padx=(12, 0))
         ttk.Button(buttons, text="Add PDFs", command=self.add_pdfs_dialog).pack(fill="x", pady=(0, 6))
+        ttk.Button(buttons, text="Add Separator", command=self.add_separator).pack(fill="x", pady=(0, 6))
         ttk.Button(buttons, text="Edit title", command=self.edit_selected_title).pack(fill="x", pady=(0, 6))
         ttk.Button(buttons, text="Auto-detect title", command=self.auto_detect_selected_title).pack(
             fill="x", pady=(0, 6)
@@ -429,7 +443,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         file_menu.add_command(label="Open/Select Matter", command=self.open_matter)
         file_menu.add_command(label="Clear Active Matter", command=self.clear_active_matter)
         file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.destroy)
+        file_menu.add_command(label="Exit", command=self._close_application)
         menu.add_cascade(label="File", menu=file_menu)
         tools_menu = tk.Menu(menu, tearoff=False)
         tools_menu.add_command(label="Flags", command=self.open_flags_dialog)
@@ -448,6 +462,9 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             self.iconphoto(True, self._icon_image)
         except tk.TclError:
             self._icon_image = None
+
+    def _close_application(self) -> None:
+        self.destroy()
 
     def _filter_font_choices(self, _event=None) -> None:
         query = self.index_font_var.get().lower()
@@ -500,7 +517,10 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
 
     def _update_status(self, message: str | None = None) -> None:
         matter_text = f"Active matter: {self.active_matter.display_name}" if self.active_matter else "No active matter"
+        separator_count = len(self.bundle_items) - len(self.pdf_items)
         pdf_text = f"{len(self.pdf_items)} PDF(s)"
+        if separator_count:
+            pdf_text = f"{pdf_text}, {separator_count} separator(s)"
         base = f"{matter_text} | {pdf_text}"
         self.status.config(text=f"{base} | {message}" if message else base)
 
@@ -537,7 +557,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             detect_title=detect_authority_index_item,
             decide_duplicate=self._decide_duplicate_pdf,
         )
-        self.pdf_items.extend(result.added)
+        self.bundle_items.extend(result.added)
         self.refresh_tree()
         added = len(result.added)
         duplicate_count = len(result.duplicates)
@@ -551,8 +571,14 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
 
     def refresh_tree(self) -> None:
         self.tree.delete(*self.tree.get_children())
-        for index, item in enumerate(self.pdf_items, start=1):
-            self.tree.insert("", tk.END, iid=str(index - 1), values=(index, item.title))
+        pdf_number = 0
+        for index, item in enumerate(self.bundle_items):
+            if isinstance(item, PDFItem):
+                pdf_number += 1
+                values = (pdf_number, item.title)
+            else:
+                values = ("", item.title)
+            self.tree.insert("", tk.END, iid=str(index), values=values)
 
     def selected_index(self) -> int | None:
         selection = self.tree.selection()
@@ -570,6 +596,23 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         if selected:
             self.add_paths([Path(p) for p in selected])
 
+    def add_separator(self) -> None:
+        title = simpledialog.askstring(
+            title="Add separator",
+            prompt="Separator title:",
+            parent=self,
+        )
+        if title is None:
+            return
+        title = title.strip()
+        if not title:
+            messagebox.showwarning("Blank title", "The title cannot be blank.")
+            return
+        self.bundle_items.append(IndexSeparator(title))
+        self.refresh_tree()
+        self.tree.selection_set(str(len(self.bundle_items) - 1))
+        self._update_status(f"Added separator: {title}")
+
     def on_tree_double_click(self, event) -> None:
         if self.tree.identify("region", event.x, event.y) == "cell" and self.tree.identify_column(event.x) == "#2":
             self.edit_selected_title()
@@ -579,7 +622,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         if index is None:
             messagebox.showwarning("Nothing selected", "Please select a PDF first.")
             return
-        item = self.pdf_items[index]
+        item = self.bundle_items[index]
         new_title = simpledialog.askstring(
             title="Edit title",
             prompt="PDF ToC entry / index item:",
@@ -592,7 +635,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         if not new_title:
             messagebox.showwarning("Blank title", "The title cannot be blank.")
             return
-        self.pdf_items[index] = replace(item, title=new_title)
+        self.bundle_items[index] = replace(item, title=new_title)
         self.refresh_tree()
         self.tree.selection_set(str(index))
         self._update_status(f"Renamed title to: {new_title}")
@@ -602,25 +645,28 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         if index is None:
             messagebox.showwarning("Nothing selected", "Please select a PDF first.")
             return
-        item = self.pdf_items[index]
-        self.pdf_items[index] = replace(item, title=detect_authority_index_item(item.path))
+        item = self.bundle_items[index]
+        if not isinstance(item, PDFItem):
+            messagebox.showwarning("Not a PDF", "Auto-detect title is only available for PDF rows.")
+            return
+        self.bundle_items[index] = replace(item, title=detect_authority_index_item(item.path))
         self.refresh_tree()
         self.tree.selection_set(str(index))
-        self._update_status(f"Auto-detected title: {self.pdf_items[index].title}")
+        self._update_status(f"Auto-detected title: {self.bundle_items[index].title}")
 
     def move_up(self) -> None:
         index = self.selected_index()
         if index is None or index == 0:
             return
-        self.pdf_items[index - 1], self.pdf_items[index] = self.pdf_items[index], self.pdf_items[index - 1]
+        self.bundle_items[index - 1], self.bundle_items[index] = self.bundle_items[index], self.bundle_items[index - 1]
         self.refresh_tree()
         self.tree.selection_set(str(index - 1))
 
     def move_down(self) -> None:
         index = self.selected_index()
-        if index is None or index >= len(self.pdf_items) - 1:
+        if index is None or index >= len(self.bundle_items) - 1:
             return
-        self.pdf_items[index + 1], self.pdf_items[index] = self.pdf_items[index], self.pdf_items[index + 1]
+        self.bundle_items[index + 1], self.bundle_items[index] = self.bundle_items[index], self.bundle_items[index + 1]
         self.refresh_tree()
         self.tree.selection_set(str(index + 1))
 
@@ -628,12 +674,13 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         index = self.selected_index()
         if index is None:
             return
-        removed = self.pdf_items.pop(index)
+        removed = self.bundle_items.pop(index)
         self.refresh_tree()
-        self._update_status(f"Removed {removed.path.name}.")
+        removed_name = removed.path.name if isinstance(removed, PDFItem) else removed.title
+        self._update_status(f"Removed {removed_name}.")
 
     def clear_list(self) -> None:
-        self.pdf_items.clear()
+        self.bundle_items.clear()
         self.refresh_tree()
         self._update_status("List cleared.")
 
@@ -670,17 +717,19 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             with tempfile.TemporaryDirectory() as tmp:
                 index_pdf = Path(tmp) / "matter_index.pdf"
                 converter = self._document_converter()
-                _used_libreoffice, links = render_matter_index_pdf(
+                rows = get_index_rows(self.bundle_items)
+                _used_libreoffice, links = render_matter_index_pdf_from_rows(
                     self.active_matter,
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
                     self.pdf_items,
+                    rows,
                     index_pdf,
                     converter=converter,
                     renderer_preference=self._renderer_preference(),
                     font_name=self.index_font_var.get(),
                 )
-                combine_with_front_index(
-                    self.pdf_items,
+                combine_bundle_items_with_front_index(
+                    self.bundle_items,
                     index_pdf,
                     links,
                     output_path,
@@ -688,6 +737,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                     int(self.font_size_var.get()),
                     int(self.margin_var.get()),
                     toc_root_title=matter_output_root(self.active_matter),
+                    index_rows=rows,
                 )
         except Exception as exc:
             traceback.print_exc()
@@ -722,26 +772,26 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
             return
         output_path = Path(output_path_str)
         palette = self.flag_palette_service.list_palette()
-        entries = get_index_entries(self.pdf_items, flag_colours=palette)
+        rows = get_index_rows(self.bundle_items, flag_colours=palette)
         self._update_status("Creating counsel's bundle PDF...")
         self.update_idletasks()
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 index_pdf = Path(tmp) / "matter_index.pdf"
                 converter = self._document_converter()
-                _used_libreoffice, links = render_matter_index_pdf(
+                _used_libreoffice, links = render_matter_index_pdf_from_rows(
                     self.active_matter,
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
                     self.pdf_items,
+                    rows,
                     index_pdf,
                     converter=converter,
                     renderer_preference=self._renderer_preference(),
                     font_name=self.index_font_var.get(),
-                    index_entries=entries,
                     colour_page_ranges=True,
                 )
-                combine_with_front_index(
-                    self.pdf_items,
+                combine_bundle_items_with_front_index(
+                    self.bundle_items,
                     index_pdf,
                     links,
                     output_path,
@@ -750,7 +800,7 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                     int(self.margin_var.get()),
                     toc_root_title=matter_output_root(self.active_matter),
                     render_options=self._counsel_pdf_render_options(palette),
-                    index_entries=entries,
+                    index_rows=rows,
                 )
         except Exception as exc:
             traceback.print_exc()
@@ -775,8 +825,8 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
         output_path = Path(output_path_str)
         try:
             palette = self.flag_palette_service.list_palette() if counsel_bundle else None
-            combine_number_and_add_toc(
-                self.pdf_items,
+            combine_bundle_items_number_and_add_toc(
+                self.bundle_items,
                 output_path,
                 self.position_var.get(),
                 int(self.font_size_var.get()),
@@ -827,15 +877,19 @@ class PDFCombinerNumbererTOCIndexApp(TkinterDnD.Tk):
                 )
                 if header is None:
                     return
-                create_matter_authorities_index_docx(
+                create_matter_authorities_index_docx_from_rows(
                     self.active_matter,
                     DocumentHeaderInput(header.strip() or "AUTHORITIES BUNDLE"),
-                    self.pdf_items,
+                    get_index_rows(self.bundle_items),
                     output_path,
                     font_name=self.index_font_var.get(),
                 )
             else:
-                create_authorities_index_docx(self.pdf_items, output_path, font_name=self.index_font_var.get())
+                create_authorities_index_docx_from_rows(
+                    get_index_rows(self.bundle_items),
+                    output_path,
+                    font_name=self.index_font_var.get(),
+                )
         except Exception as exc:
             traceback.print_exc()
             messagebox.showerror("Failed", f"Could not create authorities index: {exc}")

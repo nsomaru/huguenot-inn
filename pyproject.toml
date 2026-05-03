@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "huguenot-inn"
-version = "0.4.6a"
+version = "0.4.6.1a"
 description = "Small GUI tool to combine PDFs, add page numbers, create PDF bookmarks, and generate an authorities index."
 requires-python = ">=3.11"
 authors = [

@@ -18,6 +18,16 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+replace_if_changed() {
+  local source_path="$1"
+  local target_path="$2"
+  if [[ -f "$target_path" ]] && cmp -s "$source_path" "$target_path"; then
+    rm -f "$source_path"
+    return
+  fi
+  mv "$source_path" "$target_path"
+}
+
 [[ "$(uname -s)" == "Darwin" ]] || fail "macOS is required to build the Huguenot Inn DMG."
 [[ "$(uname -m)" == "arm64" ]] || fail "Only Apple Silicon (arm64) macOS builds are in scope for this first pass."
 
@@ -59,9 +69,13 @@ ICON_SIZES=(
 )
 for icon_size in "${ICON_SIZES[@]}"; do
   read -r height width filename <<<"$icon_size"
-  sips -z "$height" "$width" "$ICON_PNG" --out "$ICONSET/$filename" >/dev/null
+  tmp_icon="$ICONSET/${filename}.tmp"
+  sips -z "$height" "$width" "$ICON_PNG" --out "$tmp_icon" >/dev/null
+  replace_if_changed "$tmp_icon" "$ICONSET/$filename"
 done
-iconutil -c icns "$ICONSET" -o "$ICON_ICNS"
+TMP_ICON_ICNS="${ICON_ICNS}.tmp"
+iconutil -c icns "$ICONSET" -o "$TMP_ICON_ICNS"
+replace_if_changed "$TMP_ICON_ICNS" "$ICON_ICNS"
 
 pyinstaller --noconfirm --clean "$SPEC_FILE"
 

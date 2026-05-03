@@ -13,9 +13,14 @@ from huguenot.domain import (
     DEFAULT_NUMBER_POSITION,
     NUMBER_POSITIONS,
     BundleIndexEntry,
+    BundleIndexRow,
+    BundleListItem,
+    IndexSeparatorEntry,
     PDFItem,
     build_bundle_index_entries,
+    build_bundle_index_rows,
     normalize_flag_colour,
+    pdf_items_from_bundle_items,
 )
 from huguenot.domain.legal_titles import normalize_legal_display_title
 
@@ -121,19 +126,59 @@ def combine_number_and_add_toc(
 ) -> None:
     if not pdf_items:
         raise ValueError("No PDFs selected.")
+    entries = list(index_entries) if index_entries is not None else _build_entries(pdf_items, render_options)
+    _combine_number_and_add_toc_rows(
+        entries,
+        output_path,
+        position,
+        font_size,
+        margin,
+        render_options=render_options,
+    )
 
+
+def combine_bundle_items_number_and_add_toc(
+    bundle_items: list[BundleListItem],
+    output_path: Path,
+    position: str = DEFAULT_NUMBER_POSITION,
+    font_size: int = DEFAULT_NUMBER_FONT_SIZE,
+    margin: int = DEFAULT_NUMBER_MARGIN,
+    *,
+    render_options: PdfBundleRenderOptions | None = None,
+    index_rows: Sequence[BundleIndexRow] | None = None,
+) -> None:
+    if not pdf_items_from_bundle_items(bundle_items):
+        raise ValueError("No PDFs selected.")
+    rows = list(index_rows) if index_rows is not None else _build_rows(bundle_items, render_options)
+    _combine_number_and_add_toc_rows(
+        rows,
+        output_path,
+        position,
+        font_size,
+        margin,
+        render_options=render_options,
+    )
+
+
+def _combine_number_and_add_toc_rows(
+    index_rows: Sequence[BundleIndexRow],
+    output_path: Path,
+    position: str,
+    font_size: int,
+    margin: int,
+    *,
+    render_options: PdfBundleRenderOptions | None,
+) -> None:
     output_doc = fitz.open()
-    toc: list[list[int | str]] = []
+    entries = _real_entries(index_rows)
+    toc = _toc_for_index_rows(index_rows)
     try:
-        entries = list(index_entries) if index_entries is not None else _build_entries(pdf_items, render_options)
         for entry in entries:
             item = entry.item
             source = fitz.open(item.path)
             try:
                 if source.page_count == 0:
                     continue
-                toc_title = _display_toc_title(item)
-                toc.append([1, toc_title, entry.page_range.start])
                 output_doc.insert_pdf(source)
             finally:
                 source.close()
@@ -167,7 +212,61 @@ def combine_with_front_index(
 ) -> None:
     if not pdf_items:
         raise ValueError("No PDFs selected.")
+    entries = list(index_entries) if index_entries is not None else _build_entries(pdf_items, render_options)
+    _combine_with_front_index_rows(
+        entries,
+        index_pdf_path,
+        index_links,
+        output_path,
+        position,
+        font_size,
+        margin,
+        toc_root_title=toc_root_title,
+        render_options=render_options,
+    )
 
+
+def combine_bundle_items_with_front_index(
+    bundle_items: list[BundleListItem],
+    index_pdf_path: Path,
+    index_links: list[dict[str, int | float]],
+    output_path: Path,
+    position: str = DEFAULT_NUMBER_POSITION,
+    font_size: int = DEFAULT_NUMBER_FONT_SIZE,
+    margin: int = DEFAULT_NUMBER_MARGIN,
+    *,
+    toc_root_title: str = "Index",
+    render_options: PdfBundleRenderOptions | None = None,
+    index_rows: Sequence[BundleIndexRow] | None = None,
+) -> None:
+    if not pdf_items_from_bundle_items(bundle_items):
+        raise ValueError("No PDFs selected.")
+    rows = list(index_rows) if index_rows is not None else _build_rows(bundle_items, render_options)
+    _combine_with_front_index_rows(
+        rows,
+        index_pdf_path,
+        index_links,
+        output_path,
+        position,
+        font_size,
+        margin,
+        toc_root_title=toc_root_title,
+        render_options=render_options,
+    )
+
+
+def _combine_with_front_index_rows(
+    index_rows: Sequence[BundleIndexRow],
+    index_pdf_path: Path,
+    index_links: list[dict[str, int | float]],
+    output_path: Path,
+    position: str,
+    font_size: int,
+    margin: int,
+    *,
+    toc_root_title: str,
+    render_options: PdfBundleRenderOptions | None,
+) -> None:
     output_doc = fitz.open()
     index_doc = fitz.open(index_pdf_path)
     try:
@@ -177,19 +276,16 @@ def combine_with_front_index(
         index_doc.close()
 
     toc: list[list[int | str]] = [[1, toc_root_title.strip() or "Index", 1]]
-    current_start_page = index_page_count + 1
+    toc.extend(_toc_for_index_rows(index_rows, page_offset=index_page_count))
+    entries = _real_entries(index_rows)
     try:
-        entries = list(index_entries) if index_entries is not None else _build_entries(pdf_items, render_options)
         for entry in entries:
             item = entry.item
             source = fitz.open(item.path)
             try:
                 if source.page_count == 0:
                     continue
-                toc_title = _display_toc_title(item)
-                toc.append([1, toc_title, current_start_page])
                 output_doc.insert_pdf(source)
-                current_start_page += source.page_count
             finally:
                 source.close()
 
@@ -210,6 +306,7 @@ def combine_with_front_index(
                 page.insert_link({"kind": fitz.LINK_GOTO, "from": rect, "page": target_page})
 
         _set_toc(output_doc, toc)
+        _set_front_index_page_labels(output_doc, index_page_count)
         output_doc.save(output_path, garbage=4, deflate=True)
     finally:
         output_doc.close()
@@ -260,6 +357,51 @@ def _build_entries(
     )
 
 
+def _build_rows(
+    bundle_items: Sequence[BundleListItem],
+    render_options: PdfBundleRenderOptions | None,
+) -> list[BundleIndexRow]:
+    return build_bundle_index_rows(
+        bundle_items,
+        get_page_count=lambda item: get_pdf_page_count(item.path),
+        flag_colours=None if render_options is None else render_options.flag_colours,
+    )
+
+
+def _real_entries(index_rows: Sequence[BundleIndexRow]) -> list[BundleIndexEntry]:
+    return [row for row in index_rows if isinstance(row, BundleIndexEntry)]
+
+
+def _toc_for_index_rows(index_rows: Sequence[BundleIndexRow], *, page_offset: int = 0) -> list[list[int | str]]:
+    toc: list[list[int | str]] = []
+    section_title: str | None = None
+    section_entries: list[BundleIndexEntry] = []
+
+    def flush_section() -> None:
+        nonlocal section_entries
+        if section_title and section_entries:
+            toc.append(
+                [1, normalize_legal_display_title(section_title), section_entries[0].page_range.start + page_offset]
+            )
+            toc.extend(
+                [2, _display_toc_title(entry.item), entry.page_range.start + page_offset] for entry in section_entries
+            )
+        elif section_entries:
+            toc.extend(
+                [1, _display_toc_title(entry.item), entry.page_range.start + page_offset] for entry in section_entries
+            )
+        section_entries = []
+
+    for row in index_rows:
+        if isinstance(row, IndexSeparatorEntry):
+            flush_section()
+            section_title = row.title
+            continue
+        section_entries.append(row)
+    flush_section()
+    return toc
+
+
 def _entry_for_bundle_page(entries: Sequence[BundleIndexEntry], page_number: int) -> BundleIndexEntry | None:
     for entry in entries:
         if entry.page_range.start <= page_number <= entry.page_range.end:
@@ -305,6 +447,15 @@ def _number_fill_opacity(render_options: PdfBundleRenderOptions | None) -> float
 
 def _physical_markers_enabled(render_options: PdfBundleRenderOptions | None) -> bool:
     return bool(render_options and render_options.physical_flag_markers)
+
+
+def _set_front_index_page_labels(doc: fitz.Document, index_page_count: int) -> None:
+    if index_page_count <= 0:
+        return
+    labels: list[dict[str, int | str]] = [{"startpage": 0, "style": "r", "firstpagenum": 1}]
+    if doc.page_count > index_page_count:
+        labels.append({"startpage": index_page_count, "style": "D", "firstpagenum": 1})
+    doc.set_page_labels(labels)
 
 
 def _ensure_saved_toc(output_path: Path, toc: list[list[int | str]]) -> None:

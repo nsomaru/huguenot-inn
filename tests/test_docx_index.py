@@ -4,8 +4,24 @@ from zipfile import ZipFile
 import fitz
 from docx import Document
 
-from huguenot.documents import create_authorities_index_docx, create_matter_authorities_index_docx
-from huguenot.domain import Court, DocumentHeaderInput, Matter, Party, PartySide, PDFItem, ProceedingType
+from huguenot.documents import (
+    create_authorities_index_docx,
+    create_authorities_index_docx_from_rows,
+    create_matter_authorities_index_docx,
+    create_matter_authorities_index_docx_from_rows,
+)
+from huguenot.domain import (
+    BundleIndexEntry,
+    Court,
+    DocumentHeaderInput,
+    IndexSeparatorEntry,
+    Matter,
+    PageRange,
+    Party,
+    PartySide,
+    PDFItem,
+    ProceedingType,
+)
 
 
 def make_pdf(path: Path, text: str, pages: int = 1) -> None:
@@ -29,6 +45,30 @@ def test_plain_authorities_index_uses_page_ranges(tmp_path: Path) -> None:
     doc = Document(str(output))
     assert doc.tables[0].cell(1, 1).text == "Authority title"
     assert doc.tables[0].cell(1, 2).text == "1-2"
+
+
+def test_authorities_index_from_rows_renders_separator_without_number_or_page_range(tmp_path: Path) -> None:
+    pdf = tmp_path / "authority.pdf"
+    make_pdf(pdf, "Authority", pages=2)
+    output = tmp_path / "index.docx"
+
+    create_authorities_index_docx_from_rows(
+        [
+            IndexSeparatorEntry("Cases"),
+            BundleIndexEntry(1, PDFItem(pdf, "Authority title"), PageRange(1, 2)),
+        ],
+        output,
+    )
+
+    table = Document(str(output)).tables[0]
+    assert table.cell(1, 0).text == ""
+    assert table.cell(1, 1).text == "Cases"
+    assert table.cell(1, 2).text == ""
+    paragraph = table.cell(1, 1).paragraphs[0]
+    assert paragraph.alignment is not None
+    assert any(run.text == "Cases" and run.bold is True for run in paragraph.runs)
+    assert table.cell(2, 0).text == "1"
+    assert table.cell(2, 2).text == "1-2"
 
 
 def test_authorities_index_can_colour_page_range_cell_right_border_for_counsel_bundle(tmp_path: Path) -> None:
@@ -100,6 +140,34 @@ def test_matter_authorities_index_contains_header_parties_and_document_title(tmp
     assert "IN THE HIGH COURT OF SOUTH AFRICA" in text
     assert "2026-086328" in text
     assert "RESPONDENTS' AUTHORITIES BUNDLE" in text
+
+
+def test_matter_authorities_index_from_rows_supports_separator_rows(tmp_path: Path) -> None:
+    pdf = tmp_path / "authority.pdf"
+    make_pdf(pdf, "Authority", pages=1)
+    output = tmp_path / "matter_index.docx"
+    matter = Matter(
+        court=Court("IN THE HIGH COURT OF SOUTH AFRICA", "(GAUTENG DIVISION, JOHANNESBURG)"),
+        proceeding_type=ProceedingType.APPLICATION,
+        case_number="2026-086328",
+        parties=(
+            Party("Axim (Pty) Ltd", PartySide.BRINGING, 1),
+            Party("Moodie", PartySide.OPPOSING, 1),
+        ),
+    )
+
+    create_matter_authorities_index_docx_from_rows(
+        matter,
+        DocumentHeaderInput("Respondents' Authorities Bundle"),
+        [IndexSeparatorEntry("Cases"), BundleIndexEntry(1, PDFItem(pdf, "Authority title"), PageRange(1, 1))],
+        output,
+    )
+
+    table = Document(str(output)).tables[-1]
+    assert table.cell(1, 0).text == ""
+    assert table.cell(1, 1).text == "Cases"
+    assert table.cell(1, 2).text == ""
+    assert table.cell(2, 1).text == "Authority title"
 
 
 def test_matter_authorities_index_uses_table_header_rules_bold_case_and_superscript_ordinals(tmp_path: Path) -> None:

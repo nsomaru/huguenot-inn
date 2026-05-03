@@ -11,7 +11,9 @@ from reportlab.pdfgen import canvas
 
 from huguenot.domain import (
     BundleIndexEntry,
+    BundleIndexRow,
     DocumentHeaderInput,
+    IndexSeparatorEntry,
     Matter,
     PartySide,
     PDFItem,
@@ -43,7 +45,48 @@ class ReportLabIndexRenderer:
         *,
         start_page: int = 1,
         index_entries: Sequence[BundleIndexEntry] | None = None,
+        index_rows: Sequence[BundleIndexRow] | None = None,
         colour_page_ranges: bool = False,
+    ) -> list[dict[str, int | float]]:
+        entries = index_rows if index_rows is not None else index_entries
+        entries = entries if entries is not None else get_index_entries(pdf_items, start_page=start_page)
+        return self._render_pdf_rows(
+            matter,
+            document_header,
+            entries,
+            output_path,
+            start_page=start_page,
+            colour_page_ranges=colour_page_ranges,
+        )
+
+    def render_pdf_from_rows(
+        self,
+        matter: Matter,
+        document_header: DocumentHeaderInput,
+        index_rows: Sequence[BundleIndexRow],
+        output_path: Path,
+        *,
+        start_page: int = 1,
+        colour_page_ranges: bool = False,
+    ) -> list[dict[str, int | float]]:
+        return self._render_pdf_rows(
+            matter,
+            document_header,
+            index_rows,
+            output_path,
+            start_page=start_page,
+            colour_page_ranges=colour_page_ranges,
+        )
+
+    def _render_pdf_rows(
+        self,
+        matter: Matter,
+        document_header: DocumentHeaderInput,
+        entries: Sequence[BundleIndexRow],
+        output_path: Path,
+        *,
+        start_page: int,
+        colour_page_ranges: bool,
     ) -> list[dict[str, int | float]]:
         width, height = A4
         c = canvas.Canvas(str(output_path), pagesize=A4)
@@ -76,8 +119,21 @@ class ReportLabIndexRenderer:
 
         page_index = 0
         y = self._draw_table_header(c, y, width)
-        entries = index_entries if index_entries is not None else get_index_entries(pdf_items, start_page=start_page)
         for entry in entries:
+            if isinstance(entry, IndexSeparatorEntry):
+                row_height = 11 * mm
+                if y - row_height < 28 * mm:
+                    c.showPage()
+                    page_index += 1
+                    y = height - 24 * mm
+                    y = self._draw_table_header(c, y, width)
+                row_top = y
+                row_bottom = y - row_height
+                c.setFont(self.font.reportlab_bold, 10)
+                c.drawCentredString(width / 2, y - 7 * mm, entry.title)
+                self._draw_row_box(c, row_top, row_bottom, width)
+                y = row_bottom
+                continue
             number = entry.item_number
             item = entry.item
             page_range = entry.page_range

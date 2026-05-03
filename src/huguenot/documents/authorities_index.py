@@ -15,11 +15,15 @@ from docx.shared import Inches, Pt
 
 from huguenot.domain import (
     BundleIndexEntry,
+    BundleIndexRow,
+    BundleListItem,
     DocumentHeaderInput,
+    IndexSeparatorEntry,
     Matter,
     PartySide,
     PDFItem,
     build_bundle_index_entries,
+    build_bundle_index_rows,
     normalize_flag_colour,
     party_label,
 )
@@ -71,6 +75,20 @@ def get_index_entries(
 ) -> list[BundleIndexEntry]:
     return build_bundle_index_entries(
         pdf_items,
+        get_page_count=lambda item: get_pdf_page_count(item.path),
+        start_page=start_page,
+        flag_colours=flag_colours,
+    )
+
+
+def get_index_rows(
+    bundle_items: Sequence[BundleListItem],
+    *,
+    start_page: int = 1,
+    flag_colours: Sequence[str] | None = None,
+) -> list[BundleIndexRow]:
+    return build_bundle_index_rows(
+        bundle_items,
         get_page_count=lambda item: get_pdf_page_count(item.path),
         start_page=start_page,
         flag_colours=flag_colours,
@@ -178,7 +196,7 @@ def set_cell_right_border(cell, colour_hex: str, *, size: int = 36) -> None:
 
 def add_authorities_table(
     doc: WordDocument,
-    entries: Sequence[BundleIndexEntry],
+    entries: Sequence[BundleIndexRow],
     *,
     font_name: str = DEFAULT_INDEX_FONT,
     colour_page_ranges: bool = False,
@@ -197,6 +215,21 @@ def add_authorities_table(
     set_repeat_table_header(table.rows[0])
 
     for entry in entries:
+        if isinstance(entry, IndexSeparatorEntry):
+            row = table.add_row()
+            row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+            row.height = Pt(18)
+            row_cells = row.cells
+            set_cell_text(row_cells[0], "", align=WD_ALIGN_PARAGRAPH.CENTER, font_name=font_name)
+            set_cell_text(
+                row_cells[1],
+                entry.title,
+                bold=True,
+                align=WD_ALIGN_PARAGRAPH.CENTER,
+                font_name=font_name,
+            )
+            set_cell_text(row_cells[2], "", align=WD_ALIGN_PARAGRAPH.CENTER, font_name=font_name)
+            continue
         number = entry.item_number
         item = entry.item
         page_range = entry.page_range
@@ -221,6 +254,32 @@ def create_authorities_index_docx(
     index_entries: Sequence[BundleIndexEntry] | None = None,
     colour_page_ranges: bool = False,
 ) -> None:
+    create_authorities_index_docx_from_rows(
+        index_entries if index_entries is not None else get_index_entries(pdf_items),
+        output_path,
+        font_name=font_name,
+        colour_page_ranges=colour_page_ranges,
+    )
+
+
+def create_authorities_index_docx_from_rows(
+    index_rows: Sequence[BundleIndexRow],
+    output_path: Path,
+    *,
+    font_name: str = DEFAULT_INDEX_FONT,
+    colour_page_ranges: bool = False,
+) -> None:
+    doc = create_authorities_index_document(font_name=font_name)
+    add_authorities_table(
+        doc,
+        index_rows,
+        font_name=font_name,
+        colour_page_ranges=colour_page_ranges,
+    )
+    doc.save(str(output_path))
+
+
+def create_authorities_index_document(*, font_name: str = DEFAULT_INDEX_FONT) -> WordDocument:
     doc = Document()
     configure_document(doc, font_name=font_name)
 
@@ -232,13 +291,7 @@ def create_authorities_index_docx(
     )
     note.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph()
-    add_authorities_table(
-        doc,
-        index_entries if index_entries is not None else get_index_entries(pdf_items),
-        font_name=font_name,
-        colour_page_ranges=colour_page_ranges,
-    )
-    doc.save(str(output_path))
+    return doc
 
 
 def add_centered_paragraph(
@@ -329,20 +382,13 @@ def add_tramline(doc: WordDocument, *, font_name: str) -> None:
     paragraph.paragraph_format.space_after = Pt(0)
 
 
-def create_matter_authorities_index_docx(
+def add_matter_index_header(
+    doc: WordDocument,
     matter: Matter,
     document_header: DocumentHeaderInput,
-    pdf_items: list[PDFItem],
-    output_path: Path,
     *,
-    start_page: int = 1,
-    font_name: str = DEFAULT_INDEX_FONT,
-    index_entries: Sequence[BundleIndexEntry] | None = None,
-    colour_page_ranges: bool = False,
+    font_name: str,
 ) -> None:
-    doc = Document()
-    configure_document(doc, font_name=font_name)
-
     add_centered_paragraph(doc, matter.court.name.upper(), bold=True, font_name=font_name)
     if matter.court.header_line_2:
         add_centered_paragraph(doc, matter.court.header_line_2.upper(), font_name=font_name)
@@ -376,9 +422,46 @@ def create_matter_authorities_index_docx(
     heading_run.font.size = Pt(13)
     add_tramline(doc, font_name=font_name)
     doc.add_paragraph()
+
+
+def create_matter_authorities_index_docx(
+    matter: Matter,
+    document_header: DocumentHeaderInput,
+    pdf_items: list[PDFItem],
+    output_path: Path,
+    *,
+    start_page: int = 1,
+    font_name: str = DEFAULT_INDEX_FONT,
+    index_entries: Sequence[BundleIndexEntry] | None = None,
+    colour_page_ranges: bool = False,
+) -> None:
+    doc = Document()
+    configure_document(doc, font_name=font_name)
+    add_matter_index_header(doc, matter, document_header, font_name=font_name)
     add_authorities_table(
         doc,
         index_entries if index_entries is not None else get_index_entries(pdf_items, start_page=start_page),
+        font_name=font_name,
+        colour_page_ranges=colour_page_ranges,
+    )
+    doc.save(str(output_path))
+
+
+def create_matter_authorities_index_docx_from_rows(
+    matter: Matter,
+    document_header: DocumentHeaderInput,
+    index_rows: Sequence[BundleIndexRow],
+    output_path: Path,
+    *,
+    font_name: str = DEFAULT_INDEX_FONT,
+    colour_page_ranges: bool = False,
+) -> None:
+    doc = Document()
+    configure_document(doc, font_name=font_name)
+    add_matter_index_header(doc, matter, document_header, font_name=font_name)
+    add_authorities_table(
+        doc,
+        index_rows,
         font_name=font_name,
         colour_page_ranges=colour_page_ranges,
     )

@@ -11,6 +11,11 @@ class PDFItem:
     title: str
 
 
+@dataclass(frozen=True)
+class IndexSeparator:
+    title: str
+
+
 class ProceedingType(StrEnum):
     ACTION = "Action"
     APPLICATION = "Application"

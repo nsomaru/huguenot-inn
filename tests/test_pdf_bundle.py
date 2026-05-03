@@ -5,9 +5,15 @@ from typing import Any
 import fitz
 
 from huguenot.application import protocols
-from huguenot.domain import PDFItem
+from huguenot.domain import IndexSeparator, PDFItem
 from huguenot.domain.page_numbering import DEFAULT_NUMBER_FONT_SIZE, DEFAULT_NUMBER_MARGIN, DEFAULT_NUMBER_POSITION
-from huguenot.pdf import PdfBundleRenderOptions, combine_number_and_add_toc, combine_with_front_index
+from huguenot.pdf import (
+    PdfBundleRenderOptions,
+    combine_bundle_items_number_and_add_toc,
+    combine_bundle_items_with_front_index,
+    combine_number_and_add_toc,
+    combine_with_front_index,
+)
 from huguenot.pdf.bundle import draw_page_number, get_number_box, number_box_size
 
 
@@ -41,6 +47,81 @@ def test_combine_number_and_add_toc_preserves_no_matter_behavior(tmp_path: Path)
     try:
         assert doc.page_count == 3
         assert doc.get_toc() == [[1, "First authority", 1], [1, "Second authority", 2]]
+    finally:
+        doc.close()
+
+
+def test_combine_bundle_items_number_and_add_toc_uses_separator_outline_sections(tmp_path: Path) -> None:
+    first = tmp_path / "first.pdf"
+    second = tmp_path / "second.pdf"
+    third = tmp_path / "third.pdf"
+    make_pdf(first, "First", pages=1)
+    make_pdf(second, "Second", pages=1)
+    make_pdf(third, "Third", pages=1)
+    output = tmp_path / "combined.pdf"
+
+    combine_bundle_items_number_and_add_toc(
+        [
+            PDFItem(first, "Before section"),
+            IndexSeparator("Cases"),
+            PDFItem(second, "Second authority"),
+            IndexSeparator("Empty"),
+            IndexSeparator("Statutes"),
+            PDFItem(third, "Third authority"),
+            IndexSeparator("Trailing"),
+        ],
+        output,
+    )
+
+    doc = fitz.open(output)
+    try:
+        assert doc.page_count == 3
+        assert doc.get_toc() == [
+            [1, "Before section", 1],
+            [1, "Cases", 2],
+            [2, "Second authority", 2],
+            [1, "Statutes", 3],
+            [2, "Third authority", 3],
+        ]
+    finally:
+        doc.close()
+
+
+def test_combine_bundle_items_with_front_index_offsets_separator_toc_and_sets_page_labels(tmp_path: Path) -> None:
+    first = tmp_path / "first.pdf"
+    second = tmp_path / "second.pdf"
+    index = tmp_path / "index.pdf"
+    output = tmp_path / "combined.pdf"
+    make_pdf(first, "First authority", pages=1)
+    make_pdf(second, "Second authority", pages=1)
+    make_pdf(index, "Front index", pages=2)
+
+    combine_bundle_items_with_front_index(
+        [IndexSeparator("Cases"), PDFItem(first, "First authority"), PDFItem(second, "Second authority")],
+        index,
+        [{"index_page": 0, "target_page": 1, "x0": 50, "y0": 50, "x1": 150, "y1": 80}],
+        output,
+    )
+
+    doc = fitz.open(output)
+    try:
+        assert doc.page_count == 4
+        assert doc.get_toc() == [
+            [1, "Index", 1],
+            [1, "Cases", 3],
+            [2, "First authority", 3],
+            [2, "Second authority", 4],
+        ]
+        assert doc[0].get_links()[0]["page"] == 3
+        assert doc.get_page_labels() == [
+            {"startpage": 0, "prefix": "", "firstpagenum": 1, "style": "r"},
+            {"startpage": 2, "prefix": "", "firstpagenum": 1, "style": "D"},
+        ]
+        assert doc[0].get_label() == "i"
+        assert doc[1].get_label() == "ii"
+        assert doc[2].get_label() == "1"
+        assert doc[3].get_label() == "2"
+        assert " 1\n" not in f" {doc[0].get_text()}\n"
     finally:
         doc.close()
 

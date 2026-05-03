@@ -3,8 +3,9 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from typing import TypeAlias
 
-from .models import PageRange, PDFItem
+from .models import IndexSeparator, PageRange, PDFItem
 
 DEFAULT_FLAG_COLOURS: tuple[str, ...] = (
     "#3467A5",
@@ -32,6 +33,15 @@ class BundleIndexEntry:
         yield self.item_number
         yield self.item
         yield self.page_range
+
+
+@dataclass(frozen=True)
+class IndexSeparatorEntry:
+    title: str
+
+
+BundleListItem: TypeAlias = PDFItem | IndexSeparator
+BundleIndexRow: TypeAlias = BundleIndexEntry | IndexSeparatorEntry
 
 
 def normalize_flag_colour(colour: str) -> str:
@@ -75,3 +85,34 @@ def build_bundle_index_entries(
         entries.append(BundleIndexEntry(index + 1, item, page_range, colour))
         current_page += page_count
     return entries
+
+
+def build_bundle_index_rows(
+    items: Sequence[BundleListItem],
+    *,
+    get_page_count: Callable[[PDFItem], int],
+    start_page: int = 1,
+    flag_colours: Sequence[str] | None = None,
+) -> list[BundleIndexRow]:
+    palette = normalize_flag_palette(flag_colours) if flag_colours is not None else None
+    rows: list[BundleIndexRow] = []
+    current_page = start_page
+    real_index = 0
+    for item in items:
+        if isinstance(item, IndexSeparator):
+            rows.append(IndexSeparatorEntry(item.title))
+            continue
+        try:
+            page_count = max(1, get_page_count(item))
+        except Exception:
+            page_count = 1
+        page_range = PageRange(current_page, current_page + page_count - 1)
+        colour = None if palette is None else palette[real_index % len(palette)]
+        rows.append(BundleIndexEntry(real_index + 1, item, page_range, colour))
+        real_index += 1
+        current_page += page_count
+    return rows
+
+
+def pdf_items_from_bundle_items(items: Sequence[BundleListItem]) -> list[PDFItem]:
+    return [item for item in items if isinstance(item, PDFItem)]

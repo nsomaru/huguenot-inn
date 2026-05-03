@@ -4,7 +4,18 @@ import fitz
 from reportlab.lib.units import mm
 
 from huguenot.documents import PDFRenderer, RendererPreference, ReportLabIndexRenderer, render_matter_index_pdf
-from huguenot.domain import Court, DocumentHeaderInput, Matter, Party, PartySide, PDFItem, ProceedingType
+from huguenot.domain import (
+    BundleIndexEntry,
+    Court,
+    DocumentHeaderInput,
+    IndexSeparatorEntry,
+    Matter,
+    PageRange,
+    Party,
+    PartySide,
+    PDFItem,
+    ProceedingType,
+)
 
 
 def make_pdf(path: Path, text: str) -> None:
@@ -56,6 +67,38 @@ def test_reportlab_fallback_renders_pdf_and_link_rects(tmp_path: Path) -> None:
     finally:
         doc.close()
     assert links and links[0]["target_page"] == 0
+
+
+def test_reportlab_fallback_from_rows_renders_separator_without_link(tmp_path: Path) -> None:
+    source = tmp_path / "authority.pdf"
+    make_pdf(source, "Authority")
+    output = tmp_path / "index.pdf"
+    matter = Matter(
+        court=Court("IN THE HIGH COURT OF SOUTH AFRICA", "(GAUTENG DIVISION, JOHANNESBURG)"),
+        proceeding_type=ProceedingType.APPLICATION,
+        case_number="2026-086328",
+        parties=(
+            Party("Axim (Pty) Ltd", PartySide.BRINGING, 1),
+            Party("Moodie", PartySide.OPPOSING, 1),
+        ),
+    )
+
+    links = ReportLabIndexRenderer().render_pdf_from_rows(
+        matter,
+        DocumentHeaderInput("Respondents' Authorities Bundle"),
+        [IndexSeparatorEntry("Cases"), BundleIndexEntry(1, PDFItem(source, "Authority title"), PageRange(1, 1))],
+        output,
+    )
+
+    doc = fitz.open(output)
+    try:
+        text = doc[0].get_text()
+        assert "Cases" in text
+        assert "Authority title" in text
+    finally:
+        doc.close()
+    assert len(links) == 1
+    assert links[0]["target_page"] == 0
 
 
 def test_reportlab_fallback_can_colour_page_range_cell_right_border(tmp_path: Path) -> None:

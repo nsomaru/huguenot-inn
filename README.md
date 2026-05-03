@@ -5,16 +5,17 @@ Huguenot Inn is a small Tkinter desktop app for creating numbered PDF bundles an
 ## Features
 
 - Drag and drop multiple PDFs into the bundle list.
-- Reorder, remove, clear, edit titles, and auto-detect title-cased South African authority/case citations, including common Afrikaans particles.
+- Reorder, remove, clear, edit titles, add separator headings, and auto-detect title-cased South African authority/case citations, including common Afrikaans particles.
 - Combine PDFs into a **Final Court Bundle** numbered PDF.
 - Create a **Counsel's Bundle** with per-source flag colours, opaque coloured number boxes, coloured page-range markers, and physical flag-position markers.
 - Add readable page numbers with configurable position, size, and margin.
-- Create PDF bookmarks / table of contents for combined bundles.
+- Create PDF bookmarks / table of contents for combined bundles, including separator sections where added.
 - Generate a standalone Word authorities index with page ranges.
 - Create and reopen persisted matters with South African court metadata.
 - Configure saved flag colours from **Tools > Flags**.
 - Generate a matter bundle with a front authorities index, or keep the editable `.docx` index and PDF bundle separate.
 - Create invisible hyperlinks from front-index rows to the correct authority pages in the combined PDF.
+- Use internal roman page labels for front-index pages while bundled authorities restart at Arabic page 1.
 - Choose the PDF index renderer from **ReportLab (default)**, **LibreOffice**, or **Microsoft Word**.
 - Choose the index output font from a searchable system-font dropdown; Times New Roman is the default with safe backend fallbacks.
 - Render matter headers with court lines, bold case number, party tables, superscript party ordinals, and tramline heading rules based on `examples/header_example.docx`.
@@ -112,7 +113,7 @@ The output is written to `dist/Huguenot-Inn-<version>-macOS-arm64.dmg`.
 
 ## Release workflow
 
-Pushing a version tag such as `v0.4.1a` runs `.github/workflows/release.yml`. The tag version must match both `pyproject.toml` and `huguenot.__version__`. CI generates the Flatpak Python dependency manifest from `packaging/flatpak/requirements.txt`, builds unsigned artifacts for the three supported formats, and publishes a GitHub release with generated notes:
+Pushing a version tag such as `v0.4.6.1a` runs `.github/workflows/release.yml`. The tag version must match both `pyproject.toml` and `huguenot.__version__`. CI generates the Flatpak Python dependency manifest from `packaging/flatpak/requirements.txt`, builds unsigned artifacts for the three supported formats, and publishes a GitHub release with generated notes:
 
 - `Huguenot-Inn-<version>-Linux-x86_64.flatpak`
 - `Huguenot-Inn-<version>-macOS-arm64.dmg`
@@ -121,7 +122,7 @@ Pushing a version tag such as `v0.4.1a` runs `.github/workflows/release.yml`. Th
 The release job validates that exactly those three artifacts are present before calling `gh release create --generate-notes --verify-tag`. Signing, notarization, auto-updates, and non-Flatpak Linux packages are intentionally out of scope for this pass.
 
 
-The PyInstaller build includes packaged migration files and application icon assets. During the PyInstaller build, `packaging/generate_icons.py` uses Magick to generate smaller icon PNGs from `examples/new_icon.png` for packaged UI use. The source PNG is expected to already have its background removed; the build does not perform background cleanup.
+The PyInstaller build includes packaged migration files and application icon assets. During the PyInstaller build, `packaging/generate_icons.py` uses Magick to generate smaller icon PNGs from the committed icon source for packaged UI use, preserving existing generated files when their bytes are unchanged. The source PNG is expected to already have its background removed; the build does not perform background cleanup.
 
 ### DMG layout
 
